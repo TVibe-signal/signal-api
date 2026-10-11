@@ -1,6 +1,6 @@
 """TVibex402 loader.
 
-The code lives in small files (part1.py ... part33.py) so it is easy to copy on a phone.
+The code lives in small files (part1.py ... part34.py) so it is easy to copy on a phone.
 This file runs them in order inside ONE shared namespace, so it behaves like a single big file.
 part7.py (the MCP server) must stay LAST.
 
@@ -37,7 +37,7 @@ _LOADER_PARTS = [
     ("part23.py", 137, "729707 2ee03d 21b402 ab4caa 65c187 39cc89 3d856f"),
     ("part24.py", 361, "1164cc 44f32c 46cdce 1f00ab 0631f0 50eb91 c76803 4e3454 c6aa29 f8008e fee0df 1905df 3e8055 bc1906 b780c2 25116e 3acafb a6d94d 0d5238"),
     ("part25.py", 119, "1ede2b 7885ba 23e645 e72294 dd0e51 266990"),
-    ("part26.py", 232, "d4aa82 f89a93 90a730 5090be 9ef35a b2c7f6 07db8e c8e0ff 61c7d4 bdbad1 3c5e99 982284"),
+    ("part26.py", 269, "662f21 f89a93 df745b ae383a 926935 3a47e9 5956f2 4250af 812d7c 434a7e 0076ff e65503 7ad88d a84b25"),
     ("part27.py", 92, "c95253 f3cdab a4d8c9 e1a219 a7a9d1"),
     ("part28.py", 310, "cbb9c4 c1bb76 a7d79c 1bd50e 5dbcd7 869b5e 35cbf6 167ddf 6f930a c984f9 e870fe f2af5c eeac36 ad14bf 9abf74 66be11"),
     ("part29.py", 27, "d18441 9569d7"),
@@ -45,6 +45,7 @@ _LOADER_PARTS = [
     ("part32.py", 65, "32dcda 6ee219 165c88 001c66"),
     ("part33.py", 174, "8cdc48 da7ed4 f5266a 1e3d57 bd61e1 b17b4f 640ca6 c1532b 9c4e81"),
     ("part31.py", 190, "770d57 152177 d92339 945a5e bc6300 6741f1 89f58e 9e9409 2b37a6 30442a"),
+    ("part34.py", 47, "26467f ea9728 23e7ca"),
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),
 ]
 
