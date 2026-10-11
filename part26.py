@@ -2,7 +2,7 @@
 # Loads before part7. One route, no new dependency. It calls the public /signal and /exit endpoints, so the usual rate limits
 # apply. Everything that comes from the network is shown with textContent (never innerHTML): token names are chosen by
 # whoever creates the token and must be treated as hostile text.
-VERSION = "2.13.1"
+VERSION = "2.13.2"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -46,6 +46,21 @@ PLAY_HTML = r"""<!DOCTYPE html>
   .pts { min-width:2.6rem; font-weight:700; color:var(--yellow); }
   .role { font-size:.72rem; text-transform:uppercase; color:var(--muted); }
   .role.blocker { color:var(--red); } .role.caution { color:var(--yellow); } .role.positive { color:var(--green); }
+  @keyframes shimmer { 0% { background-position:-600px 0; } 100% { background-position:600px 0; } }
+  @keyframes rise { from { opacity:0; transform:translateY(8px); } to { opacity:1; transform:none; } }
+  @keyframes pop { 0% { opacity:0; transform:scale(.85); } 70% { transform:scale(1.07); } 100% { opacity:1; transform:scale(1); } }
+  .sk { background:linear-gradient(90deg,#141a2a 0%,#1f2848 50%,#141a2a 100%); background-size:1200px 100%; animation:shimmer 1.4s linear infinite; border-radius:8px; }
+  .sk-line { height:.85rem; margin:.6rem 0; } .sk-l60 { width:60%; } .sk-l90 { width:90%; }
+  .sk-badge { display:inline-block; width:4.6rem; height:1.5rem; border-radius:9999px; }
+  .sk-title { display:inline-block; width:9rem; height:1.35rem; margin-left:.6rem; vertical-align:middle; }
+  .sk-metric { height:3.3rem; border-radius:10px; }
+  .vh { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); white-space:nowrap; }
+  .enter { animation:rise .35s ease-out both; }
+  .enter .metric { animation:rise .4s ease-out both; }
+  .enter .metric:nth-child(2) { animation-delay:.05s; } .enter .metric:nth-child(3) { animation-delay:.1s; }
+  .enter .metric:nth-child(4) { animation-delay:.15s; } .enter .metric:nth-child(5) { animation-delay:.2s; }
+  .badge.pop { animation:pop .4s ease-out .1s both; }
+  @media (prefers-reduced-motion: reduce) { .sk { animation:none; } .enter, .enter .metric, .badge.pop { animation:none !important; } }
   a { color:#60a5fa; }
 </style>
 </head>
@@ -101,6 +116,25 @@ PLAY_HTML = r"""<!DOCTYPE html>
     arr.slice(0, 8).forEach(function (x) { ul.appendChild(el('li', x)); });
     return ul;
   }
+  function sk(cls) { return el('div', null, 'sk ' + cls); }
+  function showSkeleton() {
+    clear(out);
+    out.setAttribute('aria-busy', 'true');
+    var card = el('div', null, 'card');
+    var head = el('div', null, 'verdict');
+    head.appendChild(sk('sk-badge'));
+    head.appendChild(sk('sk-title'));
+    card.appendChild(head);
+    card.appendChild(sk('sk-line sk-l90'));
+    var grid = el('div', null, 'grid');
+    for (var i = 0; i < 5; i++) { grid.appendChild(sk('sk-metric')); }
+    card.appendChild(grid);
+    card.appendChild(sk('sk-line sk-l60'));
+    card.appendChild(sk('sk-line sk-l90'));
+    card.appendChild(sk('sk-line sk-l60'));
+    card.appendChild(el('span', 'Loading', 'vh'));
+    out.appendChild(card);
+  }
   function section(card, title, node) { card.appendChild(el('h3', title)); card.appendChild(node); }
 
   function whyBox(xp) {
@@ -112,7 +146,7 @@ PLAY_HTML = r"""<!DOCTYPE html>
     [['en', 'English'], ['vi', 'Tiếng Việt']].forEach(function (t) {
       var b = el('button', t[1], 'tab' + (lang === t[0] ? ' on' : ''));
       b.type = 'button';
-      b.addEventListener('click', function () { lang = t[0]; if (last) { render(last.d, last.ex, last.xp); } });
+      b.addEventListener('click', function () { lang = t[0]; if (last) { render(last.d, last.ex, last.xp, true); } });
       tabs.appendChild(b);
     });
     box.appendChild(tabs);
@@ -136,14 +170,17 @@ PLAY_HTML = r"""<!DOCTYPE html>
     return box;
   }
 
-  function render(d, ex, xp) {
+  function render(d, ex, xp, still) {
     last = { d: d, ex: ex, xp: xp };
     clear(out);
+    out.setAttribute('aria-busy', 'false');
     var dec = d.decision || {};
     var hq = d.holder_quality || {};
-    var card = el('div', null, 'card');
+    var card = el('div', null, still ? 'card' : 'card enter');  // the entrance animation plays once, not on every language switch
     var head = el('div', null, 'verdict');
-    head.appendChild(badge(d.verdict));
+    var vb = badge(d.verdict);
+    if (!still) { vb.className += ' pop'; }
+    head.appendChild(vb);
     head.appendChild(el('span', d.token || d.name || 'token'));
     card.appendChild(head);
     card.appendChild(el('p', d.summary || '', 'muted'));
@@ -191,6 +228,7 @@ PLAY_HTML = r"""<!DOCTYPE html>
 
   function showError(msg) {
     clear(out);
+    out.setAttribute('aria-busy', 'false');
     var c = el('div', null, 'card');
     c.appendChild(el('p', msg, 'err'));
     out.appendChild(c);
@@ -209,8 +247,7 @@ PLAY_HTML = r"""<!DOCTYPE html>
     if (!MINT_RE.test(mint)) { showError('That does not look like a Solana token address.'); return; }
     btn.disabled = true;
     btn.textContent = '...';
-    clear(out);
-    out.appendChild(el('p', 'Loading...', 'muted'));
+    showSkeleton();
     var q = encodeURIComponent(mint);
     Promise.all([getJson('/signal?mint=' + q), getJson('/exit?mint=' + q + '&sizes=100,1000'), getJson('/explain?mint=' + q + '&lang=both')])
       .then(function (res) {
