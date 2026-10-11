@@ -1,10 +1,10 @@
 # ---------- part35: v2.22.0 — harden /accuracy + playground UX + shared nav on accuracy ----------
 # Fixes:
 #   1. /accuracy no longer 500s when Redis / ledger_head / render helpers fail
-#   2. Paste button + auto-check on paste for /play
-#   3. Shared top-nav + theme-color on the accuracy page (was missing)
-#   4. Better mobile touch targets and loading feedback on playground
-#   5. Clearer error message when mint is invalid
+#   2. Restores HTML _num() that part24 overwrote (root cause of render crash)
+#   3. Paste button + auto-check on paste for /play
+#   4. Shared top-nav + theme-color on the accuracy page
+#   5. Better mobile touch targets and loading feedback on playground
 #
 # Safe to load last before part7. Uses SKIP checksum in main.py.
 
@@ -67,7 +67,6 @@ pre{{background:#0d1117;padding:12px;border-radius:8px;overflow:auto;font-size:1
 
 
 # Remove any previously registered /accuracy route so ours is the only one
-# (FastAPI matches in registration order; part10 registered first)
 app.router.routes[:] = [
     r for r in app.router.routes
     if not (getattr(r, "path", None) == "/accuracy" and "GET" in (getattr(r, "methods", None) or set()))
@@ -83,7 +82,6 @@ async def accuracy_page(request: Request):
     client = request.app.state.client
     head = None
 
-    # --- stats_report can fail if Redis is down ---
     try:
         rep = await stats_report(client)
     except Exception as e:
@@ -94,7 +92,6 @@ async def accuracy_page(request: Request):
             extra=f'<p class="muted">Error: {_html.escape(str(e)[:160])}</p>',
         )
 
-    # --- ledger_head is optional; never let it crash the page ---
     if PRED_ENABLED:
         try:
             if time.time() - _head_cache.get("ts", 0.0) > 60:
@@ -104,10 +101,28 @@ async def accuracy_page(request: Request):
         except Exception:
             head = None
 
-    # --- render itself can fail if a helper receives unexpected shape ---
+    # part24 redefined _num(x) -> Optional[float] for the dataset pipeline,
+    # which breaks render_accuracy (expects _num(v, suffix="") -> str).
+    # Temporarily swap, render, then put the float version back.
+    _num_float = globals().get("_num")
+
+    def _num_html(v: Any, suffix: str = "") -> str:
+        return "-" if v is None else f"{v}{suffix}"
+
+    def _rate_cell_html(rate_pct: Optional[float], n: int) -> str:
+        if rate_pct is None:
+            return f'<td class="muted">hidden (n={n}, needs {MIN_N_SHOW}+)</td>'
+        w = max(0.0, min(100.0, float(rate_pct)))
+        return f'<td><div class="bar"><span style="width:{w:.0f}%"></span></div> {w:.1f}% <span class="muted">(n={n})</span></td>'
+
+    globals()["_num"] = _num_html
+    globals()["_rate_cell"] = _rate_cell_html
+
     try:
         html_out = render_accuracy(rep, head)
     except Exception:
+        if _num_float is not None:
+            globals()["_num"] = _num_float
         tb = _html.escape(traceback.format_exc()[:2200])
         return _accuracy_error_page(
             "Measured accuracy — render error",
@@ -115,8 +130,10 @@ async def accuracy_page(request: Request):
             status=500,
             extra=f"<pre>{tb}</pre>",
         )
+    finally:
+        if _num_float is not None:
+            globals()["_num"] = _num_float
 
-    # Apply shared top-nav + theme if the polish layer is present
     try:
         if "_ui_patch" in globals():
             html_out = _ui_patch(html_out, "/accuracy")
@@ -150,13 +167,11 @@ def _patch_playground():
     if "PLAY_HTML" not in globals() or not isinstance(PLAY_HTML, str):
         return
     if 'id="pasteBtn"' in PLAY_HTML:
-        return  # already patched
+        return
 
-    # Inject extra CSS
     if "</style>" in PLAY_HTML:
         PLAY_HTML = PLAY_HTML.replace("</style>", _PLAY_EXTRA_CSS + "</style>", 1)
 
-    # Add Paste button next to Check
     PLAY_HTML = PLAY_HTML.replace(
         '<button id="btn" type="button">Check</button>',
         '<button id="pasteBtn" type="button" title="Paste from clipboard">Paste</button>'
@@ -164,7 +179,6 @@ def _patch_playground():
         1,
     )
 
-    # Richer JS: paste button, auto-check on paste, clearer loading
     old_btn = "var btn = document.getElementById('btn');"
     new_btn = """var btn = document.getElementById('btn');
   var pasteBtn = document.getElementById('pasteBtn');
@@ -191,7 +205,6 @@ def _patch_playground():
     });
   }
 
-  // Auto-run when user pastes a valid mint
   input.addEventListener('paste', function () {
     setTimeout(function () {
       var v = input.value.trim();
@@ -202,7 +215,6 @@ def _patch_playground():
     if old_btn in PLAY_HTML:
         PLAY_HTML = PLAY_HTML.replace(old_btn, new_btn, 1)
 
-    # Patch loading state to use setLoading
     for candidate in (
         "btn.disabled = true; btn.textContent = '…';",
         "btn.disabled = true; btn.textContent = '...';",
@@ -216,7 +228,6 @@ def _patch_playground():
     if old_enable in PLAY_HTML:
         PLAY_HTML = PLAY_HTML.replace(old_enable, "setLoading(false);", 1)
 
-    # Clearer invalid-mint message
     old_err = "showError('That does not look like a Solana token address.');"
     if old_err in PLAY_HTML:
         PLAY_HTML = PLAY_HTML.replace(
@@ -231,8 +242,6 @@ try:
 except Exception:
     pass
 
-
-# Re-apply UI polish nav (part34 ran before us)
 try:
     if "PLAY_HTML" in globals() and "_ui_patch" in globals():
         PLAY_HTML = _ui_patch(PLAY_HTML, "/play")
