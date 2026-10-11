@@ -46,6 +46,7 @@ _LOADER_PARTS = [
     ("part33.py", 174, "8cdc48 da7ed4 f5266a 1e3d57 bd61e1 b17b4f 640ca6 c1532b 9c4e81"),
     ("part31.py", 190, "770d57 152177 d92339 945a5e bc6300 6741f1 89f58e 9e9409 2b37a6 30442a"),
     ("part34.py", 47, "26467f ea9728 23e7ca"),
+    ("part35.py", 0, "SKIP"),  # harden /accuracy + Paste button (v2.22.0)
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),
 ]
 
