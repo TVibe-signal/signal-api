@@ -2,7 +2,7 @@
 # Loads before part7. Marketing copy that only says what the server can back up: the numbers (rate limit, batch size) come from
 # the live settings, the proof strip and the example are fetched live from /stats and /signal and drawn with textContent,
 # and a link is shown only if its page exists on this server.
-VERSION = "2.18.0"
+VERSION = "2.18.1"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -45,6 +45,11 @@ nav .links a{color:var(--muted);text-decoration:none;margin-right:1.1rem;font-si
 .btn{display:inline-block;padding:.8rem 1.5rem;border-radius:.7rem;font-weight:600;text-decoration:none;font-size:.98rem}
 .btn-primary{background:var(--accent);color:#fff}.btn-outline{border:1px solid var(--border);color:var(--text)}
 .btn:hover{filter:brightness(1.12)}
+.try{display:flex;gap:.5rem;max-width:560px;margin:0 auto .6rem}
+.try input{flex:1;min-width:0;background:var(--card);border:1px solid var(--border);border-radius:.7rem;padding:.8rem 1rem;color:var(--text);font-size:.95rem}
+.try input:focus{outline:none;border-color:var(--accent)}
+.try button{background:var(--accent);color:#fff;border:0;border-radius:.7rem;padding:0 1.3rem;font-weight:600;font-size:.95rem}
+.tryhint{text-align:center;font-size:.85rem;margin-bottom:1.6rem}
 #proof{display:none;text-align:center;margin:0 auto 2rem;max-width:720px;background:var(--card);border:1px solid var(--border);border-radius:.9rem;padding:.9rem 1.1rem;font-size:.95rem}
 #proof .muted,.muted{color:var(--muted)}
 .section{padding:2.5rem 0}
@@ -78,6 +83,7 @@ a{color:#60a5fa}
 <div class="cta">%%CTA%%</div>
 </section>
 
+%%TRY%%
 <div id="proof"></div>
 
 <section class="section">
@@ -85,7 +91,7 @@ a{color:#60a5fa}
 <p class="sub">Four data sources read for you, combined into one decision-ready answer.</p>
 <div class="grid">
 <div class="card"><h3>Verdict with reasons</h3><p>ok, caution or avoid, plus blockers, cautions, positives and what is still unknown.</p></div>
-<div class="card"><h3>Holder quality</h3><p>A 0-100 score and flags such as whale accumulating, whale dumping, holders churning and dip absorbed.</p></div>
+%%EXPLAINCARD%%<div class="card"><h3>Holder quality</h3><p>A 0-100 score and flags such as whale accumulating, whale dumping, holders churning and dip absorbed.</p></div>
 <div class="card"><h3>Security checks</h3><p>Mint and freeze authority, LP lock status, Token-2022 risks and holder concentration.</p></div>
 <div class="card"><h3>Sell cost</h3><p>Jupiter quotes for several sizes, so an agent can see what leaving would cost. A quote is not proof that a sell will succeed.</p></div>
 <div class="card"><h3>Measured in public</h3><p>Every verdict is recorded and judged about 24 hours later. Results, rules and a hash-chained ledger are open to read.</p></div>
@@ -183,7 +189,14 @@ def render_landing(base: str) -> str:
             else '<a href="/pricing" class="btn btn-outline">Pricing</a>')
     foot = _links([("/play", "Playground"), ("/docs", "Docs"), ("/pricing", "Pricing"), ("/accuracy", "Accuracy"), ("/methodology", "Methodology"),
                    ("/ledger", "Ledger"), ("/status", "Status"), ("/llms.txt", "llms.txt")], '<a href="%P%">%L%</a>')
-    return (_LANDING_TEMPLATE.replace("%%NAV%%", nav).replace("%%CTA%%", cta).replace("%%FOOT%%", foot)
+    ex_mint = "So11111111111111111111111111111111111111112"
+    try_form = ('<form class="try" action="/play" method="get"><input name="mint" required autocomplete="off" spellcheck="false" '
+                'placeholder="Paste a Solana token address" pattern="[1-9A-HJ-NP-Za-km-z]{32,44}" title="A Solana token address (32 to 44 characters)">'
+                '<button type="submit">Check</button></form>'
+                '<p class="tryhint muted">or try the example: <a href="/play?mint=' + ex_mint + '">SOL</a></p>') if _route_exists("/play") else ""
+    explain_card = ('<div class="card"><h3>Explained verdicts</h3><p>Each verdict can be explained flag by flag, in English or Vietnamese: the points '
+                    'each flag adds and what would change the result.</p></div>') if _route_exists("/explain") else ""
+    return (_LANDING_TEMPLATE.replace("%%TRY%%", try_form).replace("%%EXPLAINCARD%%", explain_card).replace("%%NAV%%", nav).replace("%%CTA%%", cta).replace("%%FOOT%%", foot)
             .replace("%%BASEJS%%", _json_mod.dumps(base).replace("</", "<\\/")).replace("%%BASE%%", _html_escape(base)).replace("%%RATE%%", str(RATE_LIMIT))
             .replace("%%KEYRATE%%", str(KEY_RATE_LIMIT)).replace("%%BATCH%%", str(MAX_BATCH)))
 
