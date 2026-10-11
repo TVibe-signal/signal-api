@@ -2,7 +2,7 @@
 # Loads before part7. One route, no new dependency. It calls the public /signal and /exit endpoints, so the usual rate limits
 # apply. Everything that comes from the network is shown with textContent (never innerHTML): token names are chosen by
 # whoever creates the token and must be treated as hostile text.
-VERSION = "2.13.0"
+VERSION = "2.13.1"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -36,6 +36,16 @@ PLAY_HTML = r"""<!DOCTYPE html>
   .flag { display:inline-block; background:#1e2433; border:1px solid var(--border); border-radius:6px; padding:.1rem .5rem; font-size:.78rem; margin:.15rem .2rem .15rem 0; }
   .err { color:var(--red); }
   pre { background:#0f131f; border-radius:10px; padding:.8rem; overflow-x:auto; font-size:.75rem; max-height:300px; }
+  .tabs { display:flex; gap:.4rem; margin:.3rem 0 .6rem; }
+  .tab { background:#0f131f; color:var(--muted); border:1px solid var(--border); border-radius:8px; padding:.3rem .8rem; font-size:.8rem; }
+  .tab.on { background:var(--accent); color:#fff; border-color:var(--accent); }
+  .why { background:#0f131f; border-left:4px solid var(--accent); border-radius:10px; padding:.9rem 1rem; }
+  .why .head { font-weight:650; margin-bottom:.5rem; }
+  .why p { margin:.35rem 0; }
+  .fl { display:flex; gap:.6rem; padding:.4rem 0; border-top:1px solid #1e293b; font-size:.9rem; }
+  .pts { min-width:2.6rem; font-weight:700; color:var(--yellow); }
+  .role { font-size:.72rem; text-transform:uppercase; color:var(--muted); }
+  .role.blocker { color:var(--red); } .role.caution { color:var(--yellow); } .role.positive { color:var(--green); }
   a { color:#60a5fa; }
 </style>
 </head>
@@ -56,6 +66,8 @@ PLAY_HTML = r"""<!DOCTYPE html>
   var out = document.getElementById('result');
   var input = document.getElementById('mint');
   var btn = document.getElementById('btn');
+  var lang = ((navigator.language || 'en').toLowerCase().indexOf('vi') === 0) ? 'vi' : 'en';
+  var last = null;
 
   function el(tag, text, cls) {
     var n = document.createElement(tag);
@@ -91,7 +103,41 @@ PLAY_HTML = r"""<!DOCTYPE html>
   }
   function section(card, title, node) { card.appendChild(el('h3', title)); card.appendChild(node); }
 
-  function render(d, ex) {
+  function whyBox(xp) {
+    var box = el('div');
+    var e = xp && xp[lang];
+    if (!e) { return box; }
+    box.appendChild(el('h3', lang === 'vi' ? 'Vì sao có kết quả này' : 'Why this verdict'));
+    var tabs = el('div', null, 'tabs');
+    [['en', 'English'], ['vi', 'Tiếng Việt']].forEach(function (t) {
+      var b = el('button', t[1], 'tab' + (lang === t[0] ? ' on' : ''));
+      b.type = 'button';
+      b.addEventListener('click', function () { lang = t[0]; if (last) { render(last.d, last.ex, last.xp); } });
+      tabs.appendChild(b);
+    });
+    box.appendChild(tabs);
+    var w = el('div', null, 'why');
+    w.appendChild(el('div', e.headline, 'head'));
+    (e.why || []).forEach(function (x) { w.appendChild(el('p', x, 'muted')); });
+    (e.flags || []).slice(0, 12).forEach(function (f) {
+      var row = el('div', null, 'fl');
+      row.appendChild(el('div', f.counted ? '+' + f.points : '-', 'pts'));
+      var body = el('div');
+      body.appendChild(el('div', f.text));
+      var rc = ['blocker', 'caution', 'positive'].indexOf(f.role) >= 0 ? f.role : '';
+      body.appendChild(el('div', f.flag + ' - ' + f.role + (f.counted ? '' : ' (not scored for this asset)'), 'role ' + rc));
+      row.appendChild(body);
+      w.appendChild(row);
+    });
+    (e.what_would_change || []).forEach(function (x) { w.appendChild(el('p', x, 'muted')); });
+    if (e.note) { w.appendChild(el('p', e.note, 'muted')); }
+    if (e.language_note) { w.appendChild(el('p', e.language_note, 'muted')); }
+    box.appendChild(w);
+    return box;
+  }
+
+  function render(d, ex, xp) {
+    last = { d: d, ex: ex, xp: xp };
     clear(out);
     var dec = d.decision || {};
     var hq = d.holder_quality || {};
@@ -108,6 +154,7 @@ PLAY_HTML = r"""<!DOCTYPE html>
     grid.appendChild(metric('Pair age', age(d.pair_age_minutes)));
     grid.appendChild(metric('Holder quality', (hq.score !== undefined ? hq.score : '-') + ' / 100'));
     card.appendChild(grid);
+    card.appendChild(whyBox(xp));
     var cols = el('div', null, 'grid');
     [['Blockers', dec.blockers], ['Cautions', dec.cautions], ['Positives', dec.positives], ['Unknown', dec.unknowns]].forEach(function (c) {
       var box = el('div');
@@ -165,15 +212,15 @@ PLAY_HTML = r"""<!DOCTYPE html>
     clear(out);
     out.appendChild(el('p', 'Loading...', 'muted'));
     var q = encodeURIComponent(mint);
-    Promise.all([getJson('/signal?mint=' + q), getJson('/exit?mint=' + q + '&sizes=100,1000')])
+    Promise.all([getJson('/signal?mint=' + q), getJson('/exit?mint=' + q + '&sizes=100,1000'), getJson('/explain?mint=' + q + '&lang=both')])
       .then(function (res) {
-        var s = res[0], e = res[1];
+        var s = res[0], e = res[1], x = res[2];
         if (!s.ok) {
           if (s.status === 429) { showError('Too many requests. Try again in ' + (s.retry || 'a few') + ' seconds.'); }
           else { showError(typeof s.body.detail === 'string' ? s.body.detail : 'Could not get data for this token (HTTP ' + s.status + ').'); }
           return;
         }
-        render(s.body, e.ok ? e.body : null);
+        render(s.body, e.ok ? e.body : null, x.ok && x.body ? x.body.explanation : null);
       })
       .catch(function () { showError('Network error. Please try again.'); })
       .then(function () { btn.disabled = false; btn.textContent = 'Check'; });
