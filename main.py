@@ -37,7 +37,7 @@ _LOADER_PARTS = [
     ("part23.py", 137, "729707 2ee03d 21b402 ab4caa 65c187 39cc89 3d856f"),
     ("part24.py", 361, "1164cc 44f32c 46cdce 1f00ab 0631f0 50eb91 c76803 4e3454 c6aa29 f8008e fee0df 1905df 3e8055 bc1906 b780c2 25116e 3acafb a6d94d 0d5238"),
     ("part25.py", 119, "1ede2b 7885ba 23e645 e72294 dd0e51 266990"),
-    ("part26.py", 430, "27be14 7127c6 4e1ec2 d986bf db6251 5d5961 a6c238 5f952a 8c69c5 d4c9c6 5754c6 eea70f 47b02e a79032 fda972 01b513 6f1bff 696dea 4566bd 8e1b57 b09fe9 19fae3 47d957 46f9eb ace8b7 af9e7f a601a3 57eccf"),
+    ("part26.py", 430, "89fa89 d7a2e6 59045c 40bb1f 3635d8 772dee 18fa47 3466ab 2cb2d4 6c2a81 74e7a2 ef59a2 cd8c2f e0c471 fb4d9b 4c9334 5fe7c6 e887e3 ace8b7 af9e7f 1e18df d7aa23"),
     ("part27.py", 92, "c95253 f3cdab a4d8c9 e1a219 a7a9d1"),
     ("part28.py", 310, "cbb9c4 c1bb76 a7d79c 1bd50e 5dbcd7 869b5e 35cbf6 167ddf 6f930a c984f9 e870fe f2af5c eeac36 ad14bf 9abf74 66be11"),
     ("part29.py", 27, "d18441 9569d7"),
