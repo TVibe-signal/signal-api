@@ -51,6 +51,7 @@ _LOADER_PARTS = [
     ("part37.py", 0, "SKIP"),  # source harden + seed growth + OG card (v2.24.0)
     ("part38.py", 0, "SKIP"),  # contact block (v2.25.0)
     ("part39.py", 0, "SKIP"),  # seed mature tokens (v2.26.0)
+    ("part40.py", 0, "SKIP"),  # agent feedback (v2.27.0)
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),
 ]
 
