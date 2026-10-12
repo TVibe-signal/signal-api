@@ -54,6 +54,10 @@ _LOADER_PARTS = [
     ("part40.py", 0, "SKIP"),  # agent feedback (v2.27.0)
     ("part41.py", 0, "SKIP"),  # dataset export (v2.28.0)
     ("part42.py", 0, "SKIP"),  # judging fallback + early liquidity (v2.29.0)
+( "part43.py" , 0 , "SKIP" ),   # snapshot store
+( "part44.py" , 0 , "SKIP" ),   # holder graph
+( "part45.py" , 0 , "SKIP" ),   # cluster
+( "part46.py" , 0 , "SKIP" ),   # private features
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),
 ]
 
