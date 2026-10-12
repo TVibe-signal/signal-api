@@ -1,6 +1,5 @@
 # ---------- v2.35: Internal Operator Endpoints (Secure) ----------
 # Chỉ hoạt động khi ENABLE_INTERNAL=true và header X-Operator-Secret đúng.
-# An toàn khi repo mã nguồn mở.
 
 VERSION = "2.35.0"
 app.version = VERSION
@@ -11,26 +10,21 @@ import json
 from typing import Optional
 from fastapi import Header, Query, Request, HTTPException
 
-# Bật/tắt toàn bộ internal
 ENABLE_INTERNAL = os.getenv("ENABLE_INTERNAL", "").lower() in ("1", "true", "yes")
-OPERATOR_SECRET = os.getenv("OPERATOR_SECRET", "")  # bắt buộc set nếu bật
+OPERATOR_SECRET = os.getenv("OPERATOR_SECRET", "")
 
 def _require_operator(x_operator_secret: Optional[str] = Header(None, alias="X-Operator-Secret")):
-    """Chặn cứng nếu chưa bật hoặc secret sai. Trả 404 để che sự tồn tại."""
     if not ENABLE_INTERNAL:
         raise HTTPException(status_code=404, detail="Not found")
     if not OPERATOR_SECRET or not x_operator_secret or x_operator_secret != OPERATOR_SECRET:
         raise HTTPException(status_code=403, detail="Forbidden")
     return True
 
-# ------------------------------------------------------------------
-# 1. Xem snapshot + outcome của 1 mint
-# ------------------------------------------------------------------
 @app.get("/internal/snap/{mint}", tags=["internal"], include_in_schema=False)
 async def internal_snapshots(
     mint: str,
+    request: Request,                                          # ← đúng thứ tự
     limit: int = Query(8, ge=1, le=30),
-    request: Request,
     x_operator_secret: Optional[str] = Header(None, alias="X-Operator-Secret"),
 ):
     _require_operator(x_operator_secret)
@@ -60,7 +54,7 @@ async def internal_snapshots(
                     "flags": snap.get("flags"),
                     "market": snap.get("market"),
                     "holder_quality": snap.get("holder_quality"),
-                    "outcomes": snap.get("outcomes"),      # quan trọng nhất
+                    "outcomes": snap.get("outcomes"),
                     "cluster": snap.get("_cluster"),
                 })
             except Exception:
@@ -74,13 +68,10 @@ async def internal_snapshots(
     except Exception as e:
         return {"error": str(e)}
 
-# ------------------------------------------------------------------
-# 2. Wallet behavior profile
-# ------------------------------------------------------------------
 @app.get("/internal/wallet/{wallet}", tags=["internal"], include_in_schema=False)
 async def internal_wallet(
     wallet: str,
-    request: Request,
+    request: Request,                                          # ← đúng thứ tự
     x_operator_secret: Optional[str] = Header(None, alias="X-Operator-Secret"),
 ):
     _require_operator(x_operator_secret)
@@ -96,13 +87,10 @@ async def internal_wallet(
         "profile": profile,
     }
 
-# ------------------------------------------------------------------
-# 3. Cluster info theo fingerprint
-# ------------------------------------------------------------------
 @app.get("/internal/cluster/{fingerprint}", tags=["internal"], include_in_schema=False)
 async def internal_cluster(
     fingerprint: str,
-    request: Request,
+    request: Request,                                          # ← đúng thứ tự
     x_operator_secret: Optional[str] = Header(None, alias="X-Operator-Secret"),
 ):
     _require_operator(x_operator_secret)
@@ -118,11 +106,9 @@ async def internal_cluster(
         "cluster": info,
     }
 
-# ------------------------------------------------------------------
-# 4. Health check nội bộ (tiện kiểm tra)
-# ------------------------------------------------------------------
 @app.get("/internal/health", tags=["internal"], include_in_schema=False)
 async def internal_health(
+    request: Request,                                          # ← đúng thứ tự
     x_operator_secret: Optional[str] = Header(None, alias="X-Operator-Secret"),
 ):
     _require_operator(x_operator_secret)
