@@ -49,17 +49,16 @@ _LOADER_PARTS = [
     ("part35.py", 0, "SKIP"),  # harden /accuracy + Paste button (v2.22.0)
     ("part36.py", 0, "SKIP"),  # favicon + source badge + degraded banner (v2.23.0)
     ("part37.py", 0, "SKIP"),  # source harden + seed growth + OG card (v2.24.0)
-    ("part38.py", 0, "SKIP"),  # contact block (v2.25.0)
-    ("part39.py", 0, "SKIP"),  # seed mature tokens (v2.26.0)
-    ("part40.py", 0, "SKIP"),  # agent feedback (v2.27.0)
-    ("part41.py", 0, "SKIP"),  # dataset export (v2.28.0)
-    ("part42.py", 0, "SKIP"),  # judging fallback + early liquidity (v2.29.0)
-( "part43.py" , 0 , "SKIP" ),   # snapshot store
-( "part44.py" , 0 , "SKIP" ),   # holder graph
-( "part45.py" , 0 , "SKIP" ),   # cluster
-( "part46.py" , 0 , "SKIP" ),   # private features
-( "part47.py" , 0 , "SKIP" ),
-    ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),
+
+    # ----- Proprietary data layer (v2.30+) -----
+    ("part43.py", 0, "SKIP"),  # Full Snapshot Store
+    ("part44.py", 0, "SKIP"),  # Holder Behavior Graph
+    ("part45.py", 0, "SKIP"),  # Risk Cluster Detection
+    ("part46.py", 0, "SKIP"),  # Private Features + Model Adjustment
+    ("part47.py", 0, "SKIP"),  # Multi-horizon Outcome Enrichment
+    ("part48.py", 0, "SKIP"),  # Internal Operator Endpoints (secure)
+
+    ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP phải cuối
 ]
 
 
