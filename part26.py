@@ -1,7 +1,7 @@
-# ---------- part26: v2.13.5 - /play: polished playground for any Solana token ----------
+# ---------- part26: v2.13.6 - /play: polished playground for any Solana token ----------
 # Loads before part7. One route, no new dependency. Calls public /signal + /exit (rate limits apply).
 # All network text is rendered with textContent (never innerHTML) — token names are hostile.
-VERSION = "2.13.5"
+VERSION = "2.13.6"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -14,6 +14,7 @@ PLAY_HTML = r"""<!DOCTYPE html>
 <meta name="color-scheme" content="dark">
 <title>TVibex402 playground</title>
 <style>
+@property --p { syntax: "<number>"; inherits: false; initial-value: 0; }
 :root {
   --bg: #070a10; --surface: #0f1521; --raised: #151d2d; --line: #222d42; --line2: #34425e;
   --text: #eef2f8; --muted: #8fa0bb; --accent: #7c83ff; --accent-soft: rgba(124,131,255,.16);
@@ -80,6 +81,7 @@ button:disabled { opacity: .5; cursor: not-allowed; }
   --p: 0; flex: none; position: relative; width: 96px; height: 96px; border-radius: 50%;
   display: grid; place-items: center; text-align: center;
   background: conic-gradient(var(--vc) calc(var(--p) * 1%), var(--track) 0);
+  transition: --p 1.1s cubic-bezier(.2, .8, .2, 1);
 }
 .ring::before { content: ""; position: absolute; inset: 9px; border-radius: 50%; background: var(--surface); }
 .ring div { position: relative; line-height: 1.1; }
@@ -104,7 +106,8 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .metric.t-avoid { border-top-color: var(--avoid); }
 
 h3 { font-size: .95rem; font-weight: 700; margin: 1.4rem 0 .55rem; letter-spacing: -.01em; }
-.groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .6rem; }
+.groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: .6rem; align-items: start; }
+.g-unknown { grid-column: 1 / -1; }
 .grp { background: var(--vs); border: 1px solid var(--vb); border-left: 4px solid var(--vc); border-radius: 12px; padding: .75rem .9rem; }
 .gh { display: flex; align-items: center; gap: .5rem; font-weight: 700; font-size: .9rem; color: var(--vc); margin-bottom: .3rem; }
 .gh i {
@@ -114,7 +117,10 @@ h3 { font-size: .95rem; font-weight: 700; margin: 1.4rem 0 .55rem; letter-spacin
 .gh em { margin-left: auto; font-style: normal; font-size: .75rem; color: var(--muted); font-weight: 600; }
 ul { padding-left: 1.05rem; }
 li { margin: .25rem 0; font-size: .88rem; color: #d3dbe9; }
-.flag { display: inline-block; background: var(--raised); border: 1px solid var(--line); border-radius: 7px; padding: .2rem .6rem; font-size: .76rem; margin: .15rem .25rem .15rem 0; color: var(--muted); }
+.flag { display: inline-block; background: var(--raised); border: 1px solid var(--line2); border-radius: 8px; padding: .3rem .7rem; font-size: .84rem; font-weight: 550; margin: .2rem .3rem .2rem 0; color: #cdd6e8; }
+.acts { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .7rem; }
+.ghost { background: var(--raised); border: 1px solid var(--line2); color: var(--muted); min-height: 0; padding: .3rem .85rem; font-size: .78rem; font-weight: 600; border-radius: 8px; }
+.ghost:hover { color: var(--text); border-color: var(--accent); filter: none; }
 
 .sellhead { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap; margin-bottom: .6rem; font-size: .88rem; }
 .sell { display: grid; grid-template-columns: 5.5rem 1fr 5rem; align-items: center; gap: .7rem; padding: .3rem 0; font-size: .88rem; }
@@ -150,7 +156,7 @@ summary:hover { color: var(--text); }
 .sk-line { height: .8rem; margin: .55rem 0; } .sk-l60 { width: 60%; } .sk-l90 { width: 90%; }
 .sk-metric { height: 3.6rem; border-radius: 12px; }
 .enter { animation: rise .4s ease-out both; }
-@media (prefers-reduced-motion: reduce) { .sk, .enter { animation: none !important; } }
+@media (prefers-reduced-motion: reduce) { .sk, .enter { animation: none !important; } .ring { transition: none !important; } }
 @media (max-width: 480px) {
   .row { flex-direction: column; } .row button { width: 100%; }
   body { padding: 1.2rem .75rem 3rem; } .vword { font-size: 1.6rem; }
@@ -170,6 +176,7 @@ summary:hover { color: var(--text); }
 <div class="chips">Try
 <button type="button" class="chip" data-mint="So11111111111111111111111111111111111111112">SOL</button>
 <button type="button" class="chip" data-mint="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v">USDC</button>
+<span id="recent" style="display:contents"></span>
 </div>
 <div id="result" aria-live="polite"></div>
 <p class="links">
@@ -217,6 +224,46 @@ summary:hover { color: var(--text); }
     var n = Number(s);
     if (!isFinite(n)) return '';
     return n >= 60 ? 't-ok' : n >= 35 ? 't-caution' : 't-avoid';
+  }
+  function nice(f) { var t = String(f).replace(/_/g, ' '); return t.charAt(0).toUpperCase() + t.slice(1); }
+  function gradeKey(g) {
+    g = String(g || '').toLowerCase();
+    if (['good', 'great', 'excellent', 'a', 'b'].indexOf(g) >= 0) return 'ok';
+    if (['fair', 'ok', 'moderate', 'medium', 'c'].indexOf(g) >= 0) return 'caution';
+    if (!g || g === '—') return 'unknown';
+    return 'avoid';
+  }
+  function copyBtn(label, text) {
+    var b = el('button', label, 'ghost');
+    b.type = 'button';
+    b.addEventListener('click', function () {
+      var done = function (t) { b.textContent = t; setTimeout(function () { b.textContent = label; }, 1400); };
+      try { navigator.clipboard.writeText(text).then(function () { done('Copied ✓'); }, function () { done('Copy failed'); }); }
+      catch (e) { done('Copy failed'); }
+    });
+    return b;
+  }
+  var RKEY = 'tvx402_recent';
+  function loadRecent() {
+    try { var a = JSON.parse(localStorage.getItem(RKEY) || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; }
+  }
+  function saveRecent(mint, name) {
+    if (!mint || !MINT_RE.test(mint)) return;
+    var a = loadRecent().filter(function (x) { return x && x.m !== mint; });
+    a.unshift({ m: mint, n: String(name || mint.slice(0, 4)).slice(0, 12) });
+    try { localStorage.setItem(RKEY, JSON.stringify(a.slice(0, 5))); } catch (e) {}
+    drawRecent();
+  }
+  function drawRecent() {
+    var box = document.getElementById('recent');
+    clear(box);
+    loadRecent().forEach(function (x) {
+      if (!x || !MINT_RE.test(String(x.m))) return;
+      var c = el('button', x.n, 'chip');
+      c.type = 'button';
+      c.addEventListener('click', function () { input.value = x.m; check(); });
+      box.appendChild(c);
+    });
   }
   function lossKey(p) { return p < 3 ? 'ok' : p < 10 ? 'caution' : 'avoid'; }
   function metric(label, value, tone) {
@@ -293,8 +340,8 @@ summary:hover { color: var(--text); }
       return box;
     }
     var head = el('div', null, 'sellhead');
-    head.appendChild(el('span', 'Exit grade ' + (ex.exit.grade || '—'), 'badge v-' + vkey(ex.combined_verdict)));
-    head.appendChild(el('span', 'Combined: ' + (ex.combined_verdict || '—'), 'note'));
+    head.appendChild(el('span', 'Exit grade: ' + (ex.exit.grade || '—'), 'badge v-' + gradeKey(ex.exit.grade)));
+    head.appendChild(el('span', 'Overall: ' + (ex.combined_verdict || '—'), 'badge v-' + vkey(ex.combined_verdict)));
     box.appendChild(head);
     (ex.exit.levels || []).forEach(function (l) {
       var loss = Number(l.loss_vs_market_pct);
@@ -325,7 +372,8 @@ summary:hover { color: var(--text); }
     var top = el('div', null, 'top');
     var ring = el('div', null, 'ring');
     var risk = Number(d.risk_score);
-    ring.style.setProperty('--p', isFinite(risk) ? Math.max(0, Math.min(100, risk)) : 0);
+    var target = isFinite(risk) ? Math.max(0, Math.min(100, risk)) : 0;
+    ring.style.setProperty('--p', still ? target : 0);
     var inner = el('div');
     inner.appendChild(el('b', isFinite(risk) ? risk : '—'));
     inner.appendChild(el('small', 'risk / 100'));
@@ -342,6 +390,12 @@ summary:hover { color: var(--text); }
 
     card.appendChild(el('p', d.summary || '', 'summary'));
     card.appendChild(el('p', d.mint || '', 'meta'));
+    if (d.mint) {
+      var acts = el('div', null, 'acts');
+      acts.appendChild(copyBtn('Copy address', d.mint));
+      acts.appendChild(copyBtn('Copy link', location.origin + '/play?mint=' + encodeURIComponent(d.mint)));
+      card.appendChild(acts);
+    }
 
     var grid = el('div', null, 'grid');
     grid.appendChild(metric('Liquidity', usd(d.liquidity_usd)));
@@ -368,7 +422,7 @@ summary:hover { color: var(--text); }
     if (gwrap.firstChild) { card.appendChild(el('h3', 'Signals')); card.appendChild(gwrap); }
 
     var flags = el('div');
-    (Array.isArray(d.flags) ? d.flags : []).slice(0, 24).forEach(function (f) { flags.appendChild(el('span', f, 'flag')); });
+    (Array.isArray(d.flags) ? d.flags : []).slice(0, 24).forEach(function (f) { flags.appendChild(el('span', nice(f), 'flag')); });
     if (flags.firstChild) { card.appendChild(el('h3', 'Flags')); card.appendChild(flags); }
 
     card.appendChild(el('h3', 'Cost to sell (Jupiter)'));
@@ -384,6 +438,8 @@ summary:hover { color: var(--text); }
     det.appendChild(el('pre', JSON.stringify(d, null, 2)));
     card.appendChild(det);
     out.appendChild(card);
+    if (!still) requestAnimationFrame(function () { requestAnimationFrame(function () { ring.style.setProperty('--p', target); }); });
+    if (!still) saveRecent(d.mint, d.token || d.name);
   }
 
   function showError(msg) {
@@ -409,7 +465,7 @@ summary:hover { color: var(--text); }
       return;
     }
     btn.disabled = true;
-    btn.textContent = '…';
+    btn.textContent = 'Checking…';
     showSkeleton();
     var q = encodeURIComponent(mint);
     Promise.all([
@@ -434,6 +490,7 @@ summary:hover { color: var(--text); }
     });
   }
 
+  drawRecent();
   btn.addEventListener('click', check);
   input.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') check(); });
   document.querySelectorAll('.chip').forEach(function (c) {
