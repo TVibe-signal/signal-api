@@ -405,4 +405,58 @@ summary:hover { color: var(--text); }
   function check() {
     var mint = input.value.trim();
     if (!MINT_RE.test(mint)) {
-      showError('That does not look like a
+      showError('That does not look like a Solana token address. Paste a mint (32–44 base58 characters).');
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = '…';
+    showSkeleton();
+    var q = encodeURIComponent(mint);
+    Promise.all([
+      getJson('/signal?mint=' + q),
+      getJson('/exit?mint=' + q + '&sizes=100,1000'),
+      getJson('/signal?mint=' + q + '&explain=1').catch(function () { return { ok: false, body: {} }; })
+    ]).then(function (res) {
+      var sig = res[0], ex = res[1], xp = res[2];
+      if (!sig.ok) {
+        var msg = (sig.body && (sig.body.detail || sig.body.message)) || ('HTTP ' + sig.status);
+        if (sig.status === 429) msg = 'Rate limited. Retry after ' + (sig.retry || 'a few') + 's.';
+        if (sig.status === 503) msg = 'Service temporarily unavailable (host may be sleeping). Retry in a few seconds.';
+        showError(msg);
+        return;
+      }
+      render(sig.body, ex.ok ? ex.body : null, (xp.ok && xp.body && xp.body.explain) ? xp.body.explain : null);
+    }).catch(function (e) {
+      showError(e.message || 'Network error');
+    }).finally(function () {
+      btn.disabled = false;
+      btn.textContent = 'Check';
+    });
+  }
+
+  btn.addEventListener('click', check);
+  input.addEventListener('keydown', function (ev) { if (ev.key === 'Enter') check(); });
+  document.querySelectorAll('.chip').forEach(function (c) {
+    c.addEventListener('click', function () {
+      input.value = c.getAttribute('data-mint');
+      check();
+    });
+  });
+  var preset = new URLSearchParams(window.location.search).get('mint');
+  if (preset && MINT_RE.test(preset.trim())) {
+    input.value = preset.trim();
+    check();
+  }
+})();
+</script>
+</body>
+</html>
+"""
+
+
+@app.get("/play", include_in_schema=False)
+async def playground():
+    return HTMLResponse(PLAY_HTML, headers={"Cache-Control": "no-cache"})
+
+
+print(f"[part26] v{VERSION} playground ready at /play (share a token with /play?mint=<address>)")
