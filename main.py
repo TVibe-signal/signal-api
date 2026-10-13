@@ -65,7 +65,8 @@ _LOADER_PARTS = [
     ("part54.py", 0, "SKIP"),  # Community polish + agent docs (v2.41.1)
 ("part55.py", 0, "SKIP"),  # MCP tools + Agent Feedback (v2.42.0)
     ("part56.py", 0, "SKIP"),  # Simple Watchlist + Alert (v2.42.1)
-("part57.py", 0, "SKIP"),  # Self-Improving Signal Loop (experimental v2.43)
+("part57.py", 0, "SKIP"),  # Self-Improving Loop + Evolution Dashboard
+    ("part59.py", 0, "SKIP"),  # Multi-Agent Debate + get_debate MCP tool
 
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP phải cuối
 ]
