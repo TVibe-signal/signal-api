@@ -60,6 +60,7 @@ _LOADER_PARTS = [
 ("part49.py", 0, "SKIP"),  # Network Effects – Attention + Community Conviction (v2.39.0)
 ("part50.py", 0, "SKIP"),  # v2.37.0 patch graph/cluster
 ("part51.py", 0, "SKIP"),  # v2.38.0 patch outcomes 
+("part52.py", 0, "SKIP"),  # Smart RPC Rotator + Private Ready (v2.40.0)
 
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP phải cuối
 ]
