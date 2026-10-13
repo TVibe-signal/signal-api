@@ -61,7 +61,7 @@ _LOADER_PARTS = [
 ("part50.py", 0, "SKIP"),  # v2.37.0 patch graph/cluster
 ("part51.py", 0, "SKIP"),  # v2.38.0 patch outcomes 
 ("part52.py", 0, "SKIP"),  # Smart RPC Rotator + Private Ready (v2.40.0)
-("part53.py", 0, "SKIP"),  # Seed boost + smart ranking + health extras (v2.41.0)
+("part53.py", 0, "SKIP"),  # Seed boost + smart ranking + health extras (v2.41.0) 
     ("part54.py", 0, "SKIP"),  # Community polish + agent docs (v2.41.1)
 ("part55.py", 0, "SKIP"),  # MCP tools + Agent Feedback (v2.42.0)
     ("part56.py", 0, "SKIP"),  # Simple Watchlist + Alert (v2.42.1)
