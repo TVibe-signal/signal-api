@@ -116,3 +116,33 @@ try:
 
 except Exception:
     pass
+# ---------- Cập nhật llms.txt cho 3 tính năng mới ----------
+if "LLMS_TXT" in globals():
+    LLMS_TXT += """
+
+## Community context
+Every signal may include a `community` object when enough data exists:
+- attention: how many times the mint was queried in 1h / 6h / 24h
+- conviction: distribution of recent verdicts (ok / caution / avoid %) + dominant verdict
+- summary: short human-readable sentence
+
+Use community as extra context only. It is not financial advice and not a guarantee.
+
+## Agent Feedback
+POST /feedback?mint=ADDRESS&useful=yes|no|neutral&note=optional
+MCP tool: submit_agent_feedback(mint, useful, note="")
+
+Agents can anonymously report whether a verdict was useful. This helps improve the system over time.
+
+## Simple Watchlist
+- POST /watch?mints=A,B,C     → save up to 10 mints (bound to IP or API key, 7-day TTL)
+- GET  /watch                 → show current watchlist
+- GET  /watch/check           → check watched mints and return notable ones (high risk or strong community avoid)
+
+Useful for agents that want to monitor a small set of tokens without constant full polling.
+
+## New MCP tools
+- get_community(mint)           → attention + conviction + feedback summary
+- explain_verdict(mint)         → full breakdown of the current decision
+- submit_agent_feedback(...)    → report useful / not useful / neutral
+"""
