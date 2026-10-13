@@ -1,0 +1,112 @@
+# part51.py (v2.37.0) - Holder Behavior Graph v1. CẦN part50 nạp trước.
+# Mỗi lần có top_owners mới so với bản trước -> tạo edge hành vi cho từng ví.
+import json
+import time
+
+HG_ACC_ABS = 0.30        # tăng tối thiểu 0.30 điểm % supply
+HG_ACC_REL = 0.10        # và tăng tương đối >= 10% lượng đang giữ
+HG_DUMP_ABS = 0.30
+HG_DUMP_REL = 0.30       # giảm >= 30% lượng đang giữ
+HG_DIP_PCT = -10.0       # giá giảm >= 10% từ lần trước -> mua = absorbs_dip
+HG_ACTIONS_MAX = 200     # giữ 200 action gần nhất mỗi ví
+HG_TTL_DAYS = 90
+HG_GATE_S = 6 * 3600     # mỗi mint chỉ cập nhật graph 1 lần / 6h
+HG_COHOLD_ON = True
+HG_STRONG = ("accumulates", "dumps", "absorbs_dip")   # action đủ tin cậy để chấm điểm ví
+
+
+def hg_classify(prev, cur, price_chg=None):
+    """prev, cur: dict addr -> pct (điểm % supply). Trả list[(addr, action, delta_pts)].
+    left_top / entered_top là tín hiệu yếu (có thể chỉ do người khác chen vào top)."""
+    out = []
+    dip = price_chg is not None and price_chg <= HG_DIP_PCT
+    for a, c in cur.items():
+        p = prev.get(a)
+        if p is None:
+            out.append((a, "absorbs_dip" if dip else "entered_top", c))
+            continue
+        d = c - p
+        rel = d / p if p > 0 else float("inf")
+        if d >= HG_ACC_ABS and rel >= HG_ACC_REL:
+            out.append((a, "absorbs_dip" if dip else "accumulates", d))
+        elif d <= -HG_DUMP_ABS and -rel >= HG_DUMP_REL:
+            out.append((a, "dumps", d))
+    for a, p in prev.items():
+        if a not in cur:
+            out.append((a, "left_top", -p))
+    return out
+
+
+def hg_pairs(addrs):
+    s = sorted(set(addrs))
+    return [(s[i], s[j]) for i in range(len(s)) for j in range(i + 1, len(s))]
+
+
+def _hg_pct_map(raw):
+    return {a: p for a, p in hg_owners(raw) if p is not None}
+
+
+async def hg_record_graph(mint, cur_raw, prev_raw=None, price_chg=None, ts=None):
+    """Gọi khi có top_owners mới (cur_raw) và bản trước (prev_raw, có thể None).
+    price_chg: % giá đổi từ lần trước (nếu có). Trả list action đã ghi."""
+    if _hg_cmd is None:
+        return []
+    cur = _hg_pct_map(cur_raw)
+    if not cur or not await hg_gate(f"hg:g:{mint}", HG_GATE_S):
+        return []
+    ts = int(ts or time.time())
+    prev = _hg_pct_map(prev_raw) if prev_raw else None
+    ttl = HG_TTL_DAYS * 86400
+    cmds = []
+    for a in cur:
+        w = f"hg:w:{a}"
+        cmds += [["SADD", f"{w}:tokens", mint], ["HSETNX", f"{w}:meta", "first", ts],
+                 ["HSET", f"{w}:meta", "last", ts], ["EXPIRE", f"{w}:tokens", ttl],
+                 ["EXPIRE", f"{w}:meta", ttl]]
+    acts = hg_classify(prev, cur, price_chg) if prev else []
+    for a, act, d in acts:
+        w = f"hg:w:{a}"
+        cmds += [["RPUSH", f"{w}:actions", json.dumps([mint, act, ts, round(d, 2)], separators=(",", ":"))],
+                 ["LTRIM", f"{w}:actions", -HG_ACTIONS_MAX, -1],
+                 ["HINCRBY", f"{w}:cnt", act, 1], ["HINCRBY", f"{w}:cnt", "total", 1],
+                 ["EXPIRE", f"{w}:actions", ttl], ["EXPIRE", f"{w}:cnt", ttl]]
+    # Co-dump / co-accumulate: các ví cùng hành động trong cùng 1 lần cập nhật
+    dumpers = [a for a, act, _ in acts if act == "dumps"]
+    buyers = [a for a, act, _ in acts if act in ("accumulates", "absorbs_dip")]
+    for tag, grp in (("cd", dumpers), ("ca", buyers)):
+        for x, y in hg_pairs(grp):
+            cmds += [["INCR", f"hg:{tag}:{x}:{y}"], ["EXPIRE", f"hg:{tag}:{x}:{y}", ttl]]
+    # Co-hold: mỗi mint chỉ tính 1 lần (cổng 30 ngày) để không bị thổi phồng
+    if HG_COHOLD_ON and await hg_gate(f"hg:c:{mint}", 30 * 86400):
+        for x, y in hg_pairs(list(cur)):
+            cmds += [["INCR", f"hg:co:{x}:{y}"], ["EXPIRE", f"hg:co:{x}:{y}", ttl]]
+    await hg_run(cmds)
+    return acts
+
+
+def _hg_hash(x):
+    if isinstance(x, dict):
+        return x
+    return dict(zip(x[::2], x[1::2])) if x else {}
+
+
+async def hg_wallet_profile(addr):
+    """Hồ sơ hành vi 1 ví: action gần nhất, bộ đếm, first/last seen, số token từng vào top."""
+    r = await hg_run([["LRANGE", f"hg:w:{addr}:actions", 0, -1],
+                      ["HGETALL", f"hg:w:{addr}:cnt"],
+                      ["HGETALL", f"hg:w:{addr}:meta"],
+                      ["SCARD", f"hg:w:{addr}:tokens"]])
+    if not r:
+        return None
+    cnt = {k: int(v) for k, v in _hg_hash(r[1]).items()}
+    meta = _hg_hash(r[2])
+    return {"actions": [json.loads(x) for x in (r[0] or [])], "counts": cnt,
+            "first": int(meta["first"]) if "first" in meta else None,
+            "last": int(meta["last"]) if "last" in meta else None,
+            "tokens": int(r[3] or 0)}
+
+
+def hg_dump_rate(counts, min_strong=5):
+    """Tỉ lệ dump trên các action mạnh. None nếu chưa đủ mẫu (tránh kết luận sớm)."""
+    n = sum(counts.get(k, 0) for k in HG_STRONG)
+    return None if n < min_strong else counts.get("dumps", 0) / n
