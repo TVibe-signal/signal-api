@@ -57,7 +57,7 @@ _LOADER_PARTS = [
     ("part46.py", 0, "SKIP"),  # Private Features + Model Adjustment
     ("part47.py", 0, "SKIP"),  # Multi-horizon Outcome Enrichment
     ("part48.py", 0, "SKIP"),  # Internal Operator Endpoints (secure)
-("part49.py", 0, "SKIP"),  # Network Effects – Attention + Community Conviction
+("part49.py", 0, "SKIP"),  # Network Effects – Attention + Community Conviction (v2.39.0)
 ("part50.py", 0, "SKIP"),  # v2.37.0 patch graph/cluster
 ("part51.py", 0, "SKIP"),  # v2.38.0 patch outcomes 
 
