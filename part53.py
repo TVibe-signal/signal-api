@@ -1,4 +1,4 @@
-# ---------- v2.41: Seed boost + better ranking + health extras ----------
+# ---------- v2.41: Seed boost + smart ranking + health extras ----------
 VERSION = "2.41.0"
 app.version = VERSION
 app.openapi_schema = None
@@ -7,20 +7,19 @@ import os
 import time
 from typing import Optional, List, Dict, Any
 
-# ---------- 1. Seed boost (làm seed chạy mạnh hơn) ----------
-SEED_MAX_PER_DAY = int(os.getenv("SEED_MAX_PER_DAY", "120"))  # tăng nhẹ
+# ---------- 1. Seed boost ----------
+SEED_MAX_PER_DAY = int(os.getenv("SEED_MAX_PER_DAY", "120"))
 SEED_FORCE = os.getenv("SEED_FORCE", "").lower() in ("1", "true", "yes")
 
-# Ghi đè nhẹ state nếu cần
-if " _seed_state" in globals() or True:
-    try:
+try:
+    if "_seed_state" in globals():
         _seed_state["max"] = SEED_MAX_PER_DAY
-    except Exception:
-        pass
+except Exception:
+    pass
 
 # ---------- 2. Ranking thông minh cho /signals ----------
 def _rank_score(r: dict) -> float:
-    """Điểm càng thấp càng tốt (đưa lên đầu khi sort safest)."""
+    """Điểm càng thấp càng tốt (dùng khi sort safest)."""
     base = float(r.get("risk_score") or 50)
 
     # Community conviction
@@ -40,20 +39,23 @@ def _rank_score(r: dict) -> float:
     if adj is not None:
         base = 0.65 * base + 0.35 * float(adj)
 
-    # Attention nhẹ
+    # Attention
     attn = (r.get("community") or {}).get("attention") or {}
     if attn.get("24h", 0) >= 30:
-        base -= 3   # đang được quan tâm nhiều → ưu tiên nhẹ
+        base -= 3
 
     return base
 
-# Ghi đè compact + ranking trong build_batch nếu có
 _old_build_batch = build_batch if "build_batch" in globals() else None
 
 async def build_batch(client, raw_mints, security, *, sort="input", only=None, max_risk=None, top=None, view="full", charge=None):
     if _old_build_batch is None:
         raise RuntimeError("build_batch not found")
-    out = await _old_build_batch(client, raw_mints, security, sort=sort, only=only, max_risk=max_risk, top=top, view=view, charge=charge)
+    out = await _old_build_batch(
+        client, raw_mints, security,
+        sort=sort, only=only, max_risk=max_risk,
+        top=top, view=view, charge=charge
+    )
 
     try:
         results = out.get("results") or []
@@ -66,31 +68,37 @@ async def build_batch(client, raw_mints, security, *, sort="input", only=None, m
         pass
     return out
 
-# ---------- 3. Health extras ----------
-_old_health = None
-for route in list(app.routes):
-    if getattr(route, "path", "") == "/health":
-        _old_health = route.endpoint
-        break
-
+# ---------- 3. Health extras (cách an toàn, không đụng app.routes) ----------
+@app.get("/health", tags=["ops"], include_in_schema=False)
 async def health_with_extras(request: Request):
-    data = await _old_health(request) if _old_health else {"status": "ok"}
-    if not isinstance(data, dict):
-        return data
+    data = {
+        "status": "ok",
+        "version": VERSION,
+    }
+
+    # Cố gắng lấy dữ liệu health gốc nếu có
+    try:
+        # Gọi các hàm health cũ nếu tồn tại
+        if "health" in globals() and callable(health):
+            original = await health(request)
+            if isinstance(original, dict):
+                data.update(original)
+    except Exception:
+        pass
 
     try:
-        # Seed status
+        # Seed info
         data["seed"] = data.get("seed") or {}
         data["seed"]["force"] = SEED_FORCE
         data["seed"]["max_per_day"] = SEED_MAX_PER_DAY
 
-        # Multi-horizon pending (nếu có)
+        # Multi-horizon pending
         if PRED_ENABLED:
             client = request.app.state.client
             res = await redis_pipe(client, [["ZCARD", "pending_multi"]])
             data["multi_horizon_pending"] = int((res or [0])[0] or 0)
 
-        # RPC rotator quick stats
+        # RPC rotator
         if "_rpc_stats" in globals():
             data["rpc_rotator"] = {
                 "endpoints": len(_rpc_stats),
@@ -98,9 +106,7 @@ async def health_with_extras(request: Request):
             }
     except Exception:
         pass
+
     return data
 
-# Thay endpoint health
-if _old_health:
-    app.routes = [r for r in app.routes if getattr(r, "path", "") != "/health"]
-    app.add_api_route("/health", health_with_extras, methods=["GET"], tags=["ops"])
+print(f"[part53] v{VERSION} seed boost + smart ranking + health extras loaded")
