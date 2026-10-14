@@ -1,5 +1,5 @@
-# ---------- v2.50: SI Command Center UI ----------
-VERSION = "2.50.0"
+# ---------- v2.50.1: SI Command Center UI (resilient) ----------
+VERSION = "2.50.1"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -55,12 +55,12 @@ SI_UI_HTML = r"""<!DOCTYPE html>
     background: rgba(92,225,255,.08); border: 1px solid rgba(92,225,255,.25);
     color: var(--cyan); font-size: 12px; letter-spacing: .04em;
   }
+  .pill.warn { border-color: rgba(251,191,36,.35); color: var(--amber); background: rgba(251,191,36,.08); }
+  .pill.bad { border-color: rgba(251,113,133,.35); color: var(--red); background: rgba(251,113,133,.08); }
   .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 12px var(--green); }
-  .grid {
-    display: grid;
-    grid-template-columns: repeat(12, 1fr);
-    gap: 14px;
-  }
+  .dot.warn { background: var(--amber); box-shadow: 0 0 12px var(--amber); }
+  .dot.bad { background: var(--red); box-shadow: 0 0 12px var(--red); }
+  .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; }
   .card {
     background: linear-gradient(180deg, rgba(255,255,255,.03), transparent 40%), var(--panel);
     border: 1px solid var(--line);
@@ -76,16 +76,15 @@ SI_UI_HTML = r"""<!DOCTYPE html>
   }
   .c4 { grid-column: span 4; }
   .c6 { grid-column: span 6; }
-  .c8 { grid-column: span 8; }
   .c12 { grid-column: span 12; }
   @media (max-width: 860px) {
-    .c4, .c6, .c8, .c12 { grid-column: span 12; }
+    .c4, .c6, .c12 { grid-column: span 12; }
   }
   .label {
     font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
     margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;
   }
-  .value { font-size: 1.55rem; font-weight: 650; }
+  .value { font-size: 1.55rem; font-weight: 650; word-break: break-word; }
   .muted { color: var(--muted); font-size: 13px; }
   .row { display: flex; gap: 10px; flex-wrap: wrap; }
   .tag {
@@ -99,10 +98,8 @@ SI_UI_HTML = r"""<!DOCTYPE html>
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { color: var(--muted); font-weight: 500; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; }
-  .bar {
-    height: 6px; border-radius: 99px; background: #182033; overflow: hidden; margin-top: 8px;
-  }
-  .bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--violet), var(--cyan)); }
+  .bar { height: 6px; border-radius: 99px; background: #182033; overflow: hidden; margin-top: 8px; }
+  .bar > i { display: block; height: 100%; background: linear-gradient(90deg, var(--violet), var(--cyan)); width: 0%; transition: width .4s ease; }
   input[type=text] {
     width: 100%; background: #0a0e16; border: 1px solid var(--line); color: var(--text);
     border-radius: 12px; padding: 12px 14px; font-size: 14px; outline: none;
@@ -113,18 +110,16 @@ SI_UI_HTML = r"""<!DOCTYPE html>
     color: #061018; border: 0; border-radius: 12px; padding: 12px 16px;
     font-weight: 650; cursor: pointer;
   }
-  button.secondary {
-    background: transparent; color: var(--text); border: 1px solid var(--line);
-  }
+  button.secondary { background: transparent; color: var(--text); border: 1px solid var(--line); }
   .actions { display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap; }
   pre {
     background: #0a0e16; border: 1px solid var(--line); border-radius: 12px;
     padding: 12px; overflow: auto; font-size: 12px; line-height: 1.45; color: #cbd5e1;
-    max-height: 320px;
+    max-height: 320px; white-space: pre-wrap; word-break: break-word;
   }
   .footer { margin-top: 28px; color: var(--muted); font-size: 12px; text-align: center; }
   a { color: var(--cyan); text-decoration: none; }
-  .skeleton { opacity: .45; }
+  .empty { color: var(--muted); font-size: 13px; line-height: 1.5; }
 </style>
 </head>
 <body>
@@ -135,39 +130,39 @@ SI_UI_HTML = r"""<!DOCTYPE html>
       <h1>SI Command Center</h1>
       <p class="sub">Live view of regime, debate learning, hypotheses, causal memory and predictive attention — the self-improving stack behind every signal.</p>
     </div>
-    <div class="pill"><span class="dot"></span> <span id="liveState">Connecting…</span></div>
+    <div class="pill" id="statusPill"><span class="dot" id="statusDot"></span> <span id="liveState">Loading…</span></div>
   </header>
 
   <div class="grid">
     <section class="card c4">
       <div class="label">Market Regime</div>
-      <div class="value" id="regimeName">—</div>
-      <div class="muted" id="regimeMeta">confidence · samples</div>
-      <div class="bar"><i id="regimeBar" style="width:0%"></i></div>
+      <div class="value" id="regimeName">…</div>
+      <div class="muted" id="regimeMeta">—</div>
+      <div class="bar"><i id="regimeBar"></i></div>
     </section>
 
     <section class="card c4">
       <div class="label">SI Learning</div>
-      <div class="value" id="siFed">—</div>
+      <div class="value" id="siFed">…</div>
       <div class="muted">outcomes fed into debate + hypotheses</div>
       <div class="row" style="margin-top:10px" id="siTags"></div>
     </section>
 
     <section class="card c4">
       <div class="label">Predictive Attention</div>
-      <div class="value" id="predCount">—</div>
+      <div class="value" id="predCount">…</div>
       <div class="muted">tokens with rising short-term attention</div>
       <div class="row" style="margin-top:10px" id="predTop"></div>
     </section>
 
     <section class="card c6">
       <div class="label">Debate Persona Accuracy</div>
-      <div id="debateTable" class="muted">Loading…</div>
+      <div id="debateTable" class="empty">Loading…</div>
     </section>
 
     <section class="card c6">
       <div class="label">Active Hypotheses</div>
-      <div id="hypoTable" class="muted">Loading…</div>
+      <div id="hypoTable" class="empty">Loading…</div>
     </section>
 
     <section class="card c12">
@@ -175,19 +170,20 @@ SI_UI_HTML = r"""<!DOCTYPE html>
       <input id="mintInput" type="text" placeholder="Paste a Solana mint address" value="So11111111111111111111111111111111111111112"/>
       <div class="actions">
         <button onclick="inspectMint()">Run SI inspect</button>
-        <button class="secondary" onclick="loadAll()">Refresh dashboard</button>
+        <button class="secondary" onclick="loadAll()">Refresh</button>
       </div>
-      <div style="margin-top:14px" id="inspectOut"><pre class="skeleton">Waiting for inspect…</pre></div>
+      <div style="margin-top:14px" id="inspectOut"><pre class="empty">Paste a mint and run inspect.</pre></div>
     </section>
 
     <section class="card c12">
-      <div class="label">Evolution proposals (self-improve)</div>
-      <div id="evolBox" class="muted">Loading…</div>
+      <div class="label">Evolution proposals</div>
+      <div id="evolBox" class="empty">Loading…</div>
     </section>
   </div>
 
   <div class="footer">
     Heuristic SI layer · Not financial advice ·
+    <a href="/">Home</a> ·
     <a href="/docs">API docs</a> ·
     <a href="/accuracy/story">Accuracy story</a> ·
     <a href="/llms.txt">llms.txt</a>
@@ -198,24 +194,45 @@ SI_UI_HTML = r"""<!DOCTYPE html>
 const $ = (id) => document.getElementById(id);
 
 async function j(url) {
-  const r = await fetch(url);
-  if (!r.ok) throw new Error(url + " " + r.status);
-  return r.json();
+  const r = await fetch(url, { headers: { "Accept": "application/json" } });
+  const text = await r.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+  if (!r.ok) {
+    const err = new Error((data && (data.detail || data.message)) || (url + " → " + r.status));
+    err.status = r.status;
+    err.data = data;
+    throw err;
+  }
+  return data;
 }
 
-function tag(text, cls="") {
-  return `<span class="tag \( {cls}"> \){text}</span>`;
+function tag(text, cls) {
+  return `<span class="tag \( {cls || ""}"> \){text}</span>`;
+}
+
+function setStatus(mode, text) {
+  const pill = $("statusPill");
+  const dot = $("statusDot");
+  pill.className = "pill" + (mode === "ok" ? "" : mode === "warn" ? " warn" : " bad");
+  dot.className = "dot" + (mode === "ok" ? "" : mode === "warn" ? " warn" : " bad");
+  $("liveState").textContent = text;
 }
 
 async function loadRegime() {
   try {
     const d = await j("/regime");
-    $("regimeName").textContent = (d.regime || d.name || "unknown").replaceAll("_", " ");
-    const conf = Math.round((d.confidence || 0) * 100);
+    const name = (d.regime || d.name || "unknown").toString().replaceAll("_", " ");
+    $("regimeName").textContent = name;
+    const conf = Math.round((Number(d.confidence) || 0) * 100);
     \( ("regimeMeta").textContent = ` \){conf}% confidence · n=\( {d.n ?? "—"} · bad_rate= \){d.bad_rate ?? "—"}`;
-    $("regimeBar").style.width = conf + "%";
-  } catch {
+    $("regimeBar").style.width = Math.min(100, Math.max(0, conf)) + "%";
+    return true;
+  } catch (e) {
     $("regimeName").textContent = "unavailable";
+    $("regimeMeta").textContent = e.status === 404 ? "endpoint not loaded" : String(e.message || e);
+    $("regimeBar").style.width = "0%";
+    return false;
   }
 }
 
@@ -223,14 +240,16 @@ async function loadSI() {
   try {
     const d = await j("/si/status");
     const m = d.meta || {};
-    $("siFed").textContent = m.outcomes_fed || 0;
+    $("siFed").textContent = m.outcomes_fed ?? 0;
     const layers = d.layers || {};
-    $("siTags").innerHTML = Object.entries(layers)
-      .map(([k,v]) => tag(k, v ? "ok" : "bad")).join("");
-    $("liveState").textContent = "SI online · " + (d.version || "");
-  } catch {
+    $("siTags").innerHTML = Object.keys(layers).length
+      ? Object.entries(layers).map(([k, v]) => tag(k, v ? "ok" : "bad")).join("")
+      : tag("no layer info", "warn");
+    return true;
+  } catch (e) {
     $("siFed").textContent = "—";
-    $("liveState").textContent = "Partial SI";
+    $("siTags").innerHTML = tag(e.status === 404 ? "si/status missing" : "error", "bad");
+    return false;
   }
 }
 
@@ -239,11 +258,18 @@ async function loadPred() {
     const d = await j("/predictive-attention?limit=5");
     const items = d.items || [];
     $("predCount").textContent = items.length;
-    $("predTop").innerHTML = items.slice(0,3)
-      .map(i => tag((i.mint || "").slice(0,4) + "…" + (i.mint || "").slice(-4) + " · " + i.score, "cyan"))
-      .join("") || tag("no signals yet");
-  } catch {
+    $("predTop").innerHTML = items.length
+      ? items.slice(0, 3).map(i => {
+          const m = (i.mint || "").toString();
+          const short = m.length > 10 ? m.slice(0, 4) + "…" + m.slice(-4) : m;
+          return tag(short + " · " + i.score, "cyan");
+        }).join("")
+      : tag("no rising tokens yet", "warn");
+    return true;
+  } catch (e) {
     $("predCount").textContent = "—";
+    $("predTop").innerHTML = tag(e.status === 404 ? "not loaded" : "error", "bad");
+    return false;
   }
 }
 
@@ -251,15 +277,20 @@ async function loadDebate() {
   try {
     const d = await j("/debate/scores");
     const s = d.persona_accuracy || {};
-    const rows = Object.entries(s).map(([name, v]) => {
-      const acc = v.accuracy == null ? "—" : Math.round(v.accuracy * 100) + "%";
+    const entries = Object.entries(s);
+    if (!entries.length) {
+      $("debateTable").innerHTML = `<div class="empty">No scored debates yet.<br/>Waiting for outcomes to land.</div>`;
+      return true;
+    }
+    const rows = entries.map(([name, v]) => {
+      const acc = v.accuracy == null ? "—" : Math.round(Number(v.accuracy) * 100) + "%";
       return `<tr><td>\( {name}</td><td> \){acc}</td><td>${v.n || 0}</td></tr>`;
     }).join("");
-    $("debateTable").innerHTML = rows
-      ? `<table><thead><tr><th>Persona</th><th>Accuracy</th><th>n</th></tr></thead><tbody>${rows}</tbody></table>`
-      : "No scored debates yet — waiting for outcomes.";
-  } catch {
-    $("debateTable").textContent = "Unavailable";
+    \( ("debateTable").innerHTML = `<table><thead><tr><th>Persona</th><th>Accuracy</th><th>n</th></tr></thead><tbody> \){rows}</tbody></table>`;
+    return true;
+  } catch (e) {
+    \( ("debateTable").innerHTML = `<div class="empty"> \){e.status === 404 ? "Endpoint not loaded yet." : String(e.message || e)}</div>`;
+    return false;
   }
 }
 
@@ -267,6 +298,10 @@ async function loadHypo() {
   try {
     const d = await j("/hypotheses");
     const list = d.hypotheses || [];
+    if (!list.length) {
+      $("hypoTable").innerHTML = `<div class="empty">No hypotheses loaded.</div>`;
+      return true;
+    }
     const rows = list.map(h => {
       const rate = h.n ? Math.round((h.bad || 0) / h.n * 100) + "%" : "—";
       const cls = h.status === "supported" ? "ok" : h.status === "weak" ? "bad" : "warn";
@@ -277,11 +312,11 @@ async function loadHypo() {
         <td>${rate}</td>
       </tr>`;
     }).join("");
-    $("hypoTable").innerHTML = rows
-      ? `<table><thead><tr><th>Hypothesis</th><th>Status</th><th>n</th><th>bad</th></tr></thead><tbody>${rows}</tbody></table>`
-      : "No hypotheses loaded.";
-  } catch {
-    $("hypoTable").textContent = "Unavailable";
+    \( ("hypoTable").innerHTML = `<table><thead><tr><th>Hypothesis</th><th>Status</th><th>n</th><th>bad</th></tr></thead><tbody> \){rows}</tbody></table>`;
+    return true;
+  } catch (e) {
+    \( ("hypoTable").innerHTML = `<div class="empty"> \){e.status === 404 ? "Endpoint not loaded yet." : String(e.message || e)}</div>`;
+    return false;
   }
 }
 
@@ -290,21 +325,21 @@ async function loadEvol() {
     const d = await j("/evolution?limit=5");
     const logs = d.logs || [];
     if (!logs.length) {
-      $("evolBox").textContent = "No evolution proposals yet.";
-      return;
+      $("evolBox").innerHTML = `<div class="empty">No evolution proposals yet.</div>`;
+      return true;
     }
     $("evolBox").innerHTML = logs.map(e => {
       const when = new Date((e.ts || 0) * 1000).toISOString().replace("T", " ").slice(0, 16);
-      const changes = (e.changes || []).map(c =>
-        `${c.flag}: ${c.old_weight} → ${c.new_weight}`
-      ).join(" · ") || "—";
-      return `<div style="margin-bottom:10px">
+      const changes = (e.changes || []).map(c => `${c.flag}: ${c.old_weight} → ${c.new_weight}`).join(" · ") || "—";
+      return `<div style="margin-bottom:12px">
         <div>\( {tag(e.applied ? "applied" : "proposal", e.applied ? "ok" : "cyan")} <span class="muted"> \){when} UTC</span></div>
         <div style="margin-top:6px">${changes}</div>
       </div>`;
     }).join("");
-  } catch {
-    $("evolBox").textContent = "Evolution endpoint hidden or unavailable.";
+    return true;
+  } catch (e) {
+    \( ("evolBox").innerHTML = `<div class="empty"> \){e.status === 404 ? "Evolution is hidden or not loaded (set EVOLUTION_PUBLIC=true to show)." : String(e.message || e)}</div>`;
+    return false;
   }
 }
 
@@ -313,10 +348,9 @@ async function inspectMint() {
   if (!mint) return;
   $("inspectOut").innerHTML = `<pre>Inspecting ${mint}…</pre>`;
   try {
-    const [sig, causal] = await Promise.all([
-      j("/signal?mint=" + encodeURIComponent(mint)),
-      j("/causal/" + encodeURIComponent(mint)).catch(() => null),
-    ]);
+    const sig = await j("/signal?mint=" + encodeURIComponent(mint));
+    let causal = null;
+    try { causal = await j("/causal/" + encodeURIComponent(mint)); } catch {}
     const view = {
       token: sig.token,
       verdict: (sig.decision || {}).verdict || sig.verdict,
@@ -329,19 +363,23 @@ async function inspectMint() {
     };
     \( ("inspectOut").innerHTML = `<pre> \){JSON.stringify(view, null, 2)}</pre>`;
   } catch (e) {
-    $("inspectOut").innerHTML = `<pre>Error: ${e.message}</pre>`;
+    $("inspectOut").innerHTML = `<pre>Error: ${e.message || e}</pre>`;
   }
 }
 
 async function loadAll() {
-  $("liveState").textContent = "Refreshing…";
-  await Promise.all([
+  setStatus("warn", "Refreshing…");
+  const results = await Promise.all([
     loadRegime(), loadSI(), loadPred(), loadDebate(), loadHypo(), loadEvol()
   ]);
+  const ok = results.filter(Boolean).length;
+  if (ok === results.length) setStatus("ok", `SI online · \( {ok}/ \){results.length} panels`);
+  else if (ok === 0) setStatus("bad", "No SI endpoints reachable");
+  else setStatus("warn", `Partial · \( {ok}/ \){results.length} panels`);
 }
 
 loadAll();
-setInterval(loadAll, 60000);
+setInterval(loadAll, 90000);
 </script>
 </body>
 </html>
@@ -352,4 +390,4 @@ setInterval(loadAll, 60000);
 async def si_command_center():
     return HTMLResponse(SI_UI_HTML)
 
-print(f"[part69] v{VERSION} SI Command Center UI loaded → GET /si")
+print(f"[part69] v{VERSION} SI Command Center UI (resilient) → GET /si")
