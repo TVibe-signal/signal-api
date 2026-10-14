@@ -72,10 +72,10 @@ _LOADER_PARTS = [
     ("part62.py", 0, "SKIP"),  # MCP re-register + cleanup
     ("part63.py", 0, "SKIP"),  # Soft-gate + SOTD + accuracy story + docs
     ("part64.py", 0, "SKIP"),  # Predictive Attention + Agent Reputation
-("part65.py", 0, "SKIP"),  # Causal Memory Graph (SI)
 ("part65.py", 0, "SKIP"),  # Causal Memory Graph
-    ("part66.py", 0, "SKIP"),  # Self-Generated Hypotheses + Market Regime
+    ("part66.py", 0, "SKIP"),  # Hypotheses + Market Regime
     ("part67.py", 0, "SKIP"),  # Debate vs Outcome Learning
+    ("part68.py", 0, "SKIP"),  # SI Outcome Hook (close the loop)
 
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP phải cuối
 ]
