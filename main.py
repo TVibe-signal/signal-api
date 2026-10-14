@@ -83,6 +83,7 @@ _LOADER_PARTS = [
 ("part73.py", 0, "SKIP"),  # SI Event Log (Soft Event Sourcing)
 ("part74.py", 0, "SKIP"),  # Omni + Live CF + TTD + Pre-rug
     ("part75.py", 0, "SKIP"),  # Autonomic loop + journal public + MCP omni
+("part76.py", 0, "SKIP"),  # Autonomic + Pre-rug benchmark + Omni packaging
 
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP phải cuối
 ]
