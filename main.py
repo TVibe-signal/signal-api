@@ -72,6 +72,7 @@ _LOADER_PARTS = [
     ("part62.py", 0, "SKIP"),  # MCP re-register + cleanup
     ("part63.py", 0, "SKIP"),  # Soft-gate + SOTD + accuracy story + docs
     ("part64.py", 0, "SKIP"),  # Predictive Attention + Agent Reputation
+("part65.py", 0, "SKIP"),  # Causal Memory Graph (SI)
 
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP phải cuối
 ]
