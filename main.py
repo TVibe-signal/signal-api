@@ -67,9 +67,9 @@ _LOADER_PARTS = [
     ("part56.py", 0, "SKIP"),  # Simple Watchlist + Alert (v2.42.1)
 ("part57.py", 0, "SKIP"),  # Self-Improving Loop + Evolution Dashboard
     ("part59.py", 0, "SKIP"),  # Multi-Agent Debate + get_debate MCP tool
-("part60.py", 0, "SKIP"),
-("part61.py", 0, "SKIP"),
-("part62.py", 0, "SKIP"),
+("part60.py", 0, "SKIP"),  # Hide private keys + better features + ranking fix
+    ("part61.py", 0, "SKIP"),  # RPC rotator harden
+    ("part62.py", 0, "SKIP"),  # MCP tools re-register + llms cleanup
 
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP phải cuối
 ]
