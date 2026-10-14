@@ -76,6 +76,7 @@ _LOADER_PARTS = [
     ("part66.py", 0, "SKIP"),  # Hypotheses + Market Regime
     ("part67.py", 0, "SKIP"),  # Debate vs Outcome Learning
     ("part68.py", 0, "SKIP"),  # SI Outcome Hook (close the loop)
+("part69.py", 0, "SKIP"),  # SI Command Center UI
 
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP phải cuối
 ]
