@@ -52,7 +52,6 @@ async def _breath_incr(client, n: int = 1) -> int:
 def _rpc_seems_down() -> bool:
     """Best-effort: if health-style source stats exist and rpc is down, pause."""
     try:
-        # optional global filled by health parts
         src = globals().get("_source_stats") or globals().get("SOURCE_STATS")
         if isinstance(src, dict):
             rpc = src.get("solana_rpc") or {}
@@ -73,7 +72,6 @@ async def _focus_mints(client) -> List[str]:
                     out.append(m)
     except Exception:
         pass
-    # predictive attention zset fallback
     try:
         res = await redis_pipe(client, [["ZREVRANGE", "predattn:top", 0, 9]])
         for m in (res or [[]])[0] or []:
@@ -95,7 +93,6 @@ async def _seed_mints(client) -> List[str]:
                     candidates.extend([m for m in got if isinstance(m, str)])
             except Exception:
                 pass
-    # Optional: recent trending keys if project stores them
     try:
         res = await redis_pipe(client, [["LRANGE", "seed:recent", 0, 19]])
         for m in (res or [[]])[0] or []:
@@ -167,7 +164,6 @@ async def breath_once(client) -> Dict[str, Any]:
             summary["errors"] += 1
             await asyncio.sleep(0.2)
 
-    # Light maintenance
     try:
         if "refresh_entity" in globals() and summary["pulled"] > 0:
             await refresh_entity(client)
@@ -190,8 +186,17 @@ async def breath_once(client) -> Dict[str, Any]:
 
 @app.post("/si/breath", tags=["entity"], include_in_schema=False)
 async def si_breath_run(request: Request):
-    """Manual breath trigger (operator / cron)."""
+    """Manual breath trigger (operator / cron POST)."""
     return await breath_once(request.app.state.client)
+
+@app.get("/si/breath", tags=["entity"], include_in_schema=False)
+async def si_breath_get(request: Request):
+    """Cron-friendly alias: free monitors often only support GET."""
+    try:
+        summary = await breath_once(request.app.state.client)
+        return {"ok": True, "via": "GET", "summary": summary}
+    except Exception as e:
+        return {"ok": False, "error": str(e)[:160]}
 
 @app.get("/si/breath/status", tags=["entity"])
 async def si_breath_status(request: Request):
@@ -224,10 +229,9 @@ async def build_signal(client, mint, security, prefetched=None):
         now = time.time()
         if BREATH_ENABLED and now - _last_breath >= BREATH_EVERY_S:
             _last_breath = now
-            # do not block response hard — still await short cycle for reliability on Render
             await breath_once(client)
     except Exception:
         pass
     return result, status
 
-print(f"[part77] v{VERSION} Autonomic Breath loaded → POST /si/breath · GET /si/breath/status")
+print(f"[part77] v{VERSION} Autonomic Breath loaded → POST+GET /si/breath · GET /si/breath/status")
