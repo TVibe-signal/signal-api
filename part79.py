@@ -25,6 +25,7 @@ _INF_PARTS = ("risk", "likely", "pattern", "suspect", "predict", "cluster", "dum
 _BASIS = {
     "observation": "Measured directly from on-chain or market data at fetch time.",
     "inference": "Heuristic judgement built on observed data; can be wrong. Check the observations behind it.",
+    "unknown": "Could not be verified. This is a gap in the evidence, not a finding that something is wrong.",
 }
 
 
@@ -40,6 +41,8 @@ def _flag_id(f: Any) -> str:
 
 def _flag_kind(fid: str) -> str:
     x = fid.lower()
+    if "unverified" in x or "unknown" in x:
+        return "unknown"  # khoảng trống bằng chứng, không phải một phát hiện
     if x in _OBS_EXACT or x.startswith(_OBS_PREFIX):
         return "observation"
     if any(p in x for p in _INF_PARTS):
@@ -55,7 +58,7 @@ def _label_flags(result: dict) -> dict:
         return result
     r = dict(result)  # không sửa object trong cache
     labelled: List[Dict[str, str]] = []
-    n_obs = n_inf = 0
+    n_obs = n_inf = n_unk = 0
     for f in flags:
         fid = _flag_id(f)
         if not fid:
@@ -63,6 +66,8 @@ def _label_flags(result: dict) -> dict:
         kind = _flag_kind(fid)
         if kind == "observation":
             n_obs += 1
+        elif kind == "unknown":
+            n_unk += 1
         else:
             n_inf += 1
         labelled.append({"flag": fid, "kind": kind, "basis": _BASIS[kind]})
@@ -71,6 +76,7 @@ def _label_flags(result: dict) -> dict:
         r["evidence_counts"] = {
             "observations": n_obs,
             "inferences": n_inf,
+            "unverified_flags": n_unk,
             "unknowns": len(r.get("unknowns") or []),
         }
     return r
