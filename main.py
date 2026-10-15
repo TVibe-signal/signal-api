@@ -84,10 +84,11 @@ _LOADER_PARTS = [
 ("part74.py", 0, "SKIP"),  # Omni + Live CF + TTD + Pre-rug
     ("part75.py", 0, "SKIP"),  # Autonomic loop + journal public + MCP omni
 ("part76.py", 0, "SKIP"),  # Autonomic + Pre-rug benchmark + Omni packaging
-("part77.py", 0, "SKIP"),  # Autonomic Breath — reliable focus+seed loop
-    ("part78.py", 0, "SKIP"),  # Evidence discipline: unknowns + verdict cap + untrusted text
+("part77.py", 0, "SKIP"),  # Autonomic Breath
+    ("part78.py", 0, "SKIP"),  # Evidence discipline (unknowns + verdict cap)
     ("part79.py", 0, "SKIP"),  # Flag evidence labels
-    ("part80.py", 0, "SKIP"),  # /diff snapshot compare
+    ("part80.py", 0, "SKIP"),  # Snapshot diff GET /diff
+    ("part81.py", 0, "SKIP"),  # Omni-first agent packaging
 
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP phải cuối
 ]
