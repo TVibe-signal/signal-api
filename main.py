@@ -57,40 +57,41 @@ _LOADER_PARTS = [
     ("part46.py", 0, "SKIP"),  # Private Features + Model Adjustment
     ("part47.py", 0, "SKIP"),  # Multi-horizon Outcome Enrichment
     ("part48.py", 0, "SKIP"),  # Internal Operator Endpoints (secure)
-("part49.py", 0, "SKIP"),  # Network Effects – Attention + Community Conviction (v2.39.0)
-("part50.py", 0, "SKIP"),  # v2.37.0 patch graph/cluster
-("part51.py", 0, "SKIP"),  # v2.38.0 patch outcomes 
-("part52.py", 0, "SKIP"),  # Smart RPC Rotator + Private Ready (v2.40.0)
-("part53.py", 0, "SKIP"),  # Seed boost + smart ranking + health extras (v2.41.0) 
-    ("part54.py", 0, "SKIP"),  # Community polish + agent docs (v2.41.1)
-("part55.py", 0, "SKIP"),  # MCP tools + Agent Feedback (v2.42.0)
-    ("part56.py", 0, "SKIP"),  # Simple Watchlist + Alert (v2.42.1)
-("part57.py", 0, "SKIP"),  # Self-Improving Loop + Evolution Dashboard
-    ("part59.py", 0, "SKIP"),  # Multi-Agent Debate + get_debate MCP tool
-("part60.py", 0, "SKIP"),  # Hide private + feature fix
+    ("part49.py", 0, "SKIP"),  # Attention + Community Conviction
+    ("part50.py", 0, "SKIP"),  # Graph/cluster patch
+    ("part51.py", 0, "SKIP"),  # Outcomes patch
+    ("part52.py", 0, "SKIP"),  # Smart RPC Rotator
+    ("part53.py", 0, "SKIP"),  # Seed boost + ranking + health
+    ("part54.py", 0, "SKIP"),  # Community polish
+    ("part55.py", 0, "SKIP"),  # MCP tools + Agent Feedback
+    ("part56.py", 0, "SKIP"),  # Watchlist
+    ("part57.py", 0, "SKIP"),  # Self-Improving Loop
+    ("part59.py", 0, "SKIP"),  # Multi-Agent Debate
+    ("part60.py", 0, "SKIP"),  # Hide private
     ("part61.py", 0, "SKIP"),  # RPC rotator harden
-    ("part62.py", 0, "SKIP"),  # MCP re-register + cleanup
-    ("part63.py", 0, "SKIP"),  # Soft-gate + SOTD + accuracy story + docs
-    ("part64.py", 0, "SKIP"),  # Predictive Attention + Agent Reputation
-("part65.py", 0, "SKIP"),  # Causal Memory Graph
+    ("part62.py", 0, "SKIP"),  # MCP re-register
+    ("part63.py", 0, "SKIP"),  # Soft-gate + SOTD + accuracy story
+    ("part64.py", 0, "SKIP"),  # Predictive Attention + Reputation
+    ("part65.py", 0, "SKIP"),  # Causal Memory Graph
     ("part66.py", 0, "SKIP"),  # Hypotheses + Market Regime
     ("part67.py", 0, "SKIP"),  # Debate vs Outcome Learning
-    ("part68.py", 0, "SKIP"),  # SI Outcome Hook (close the loop)
-("part69.py", 0, "SKIP"),  # SI Command Center UI
-("part70.py", 0, "SKIP"),  # SI Advanced Pack (DNA/trap/persona/CF/swarm)
+    ("part68.py", 0, "SKIP"),  # SI Outcome Hook
+    ("part69.py", 0, "SKIP"),  # SI Command Center UI
+    ("part70.py", 0, "SKIP"),  # DNA / trap / persona / CF / swarm
     ("part71.py", 0, "SKIP"),  # Nightly Self-Reflection
-("part72.py", 0, "SKIP"),  # SI Entity Core — identity, mood, focus, journal
-("part73.py", 0, "SKIP"),  # SI Event Log (Soft Event Sourcing)
-("part74.py", 0, "SKIP"),  # Omni + Live CF + TTD + Pre-rug
-    ("part75.py", 0, "SKIP"),  # Autonomic loop + journal public + MCP omni
-("part76.py", 0, "SKIP"),  # Autonomic + Pre-rug benchmark + Omni packaging
-("part77.py", 0, "SKIP"),  # Autonomic Breath
-    ("part78.py", 0, "SKIP"),  # Evidence discipline (unknowns + verdict cap)
+    ("part72.py", 0, "SKIP"),  # SI Entity Core
+    ("part73.py", 0, "SKIP"),  # SI Event Log
+    ("part74.py", 0, "SKIP"),  # Omni + Live CF + TTD + Pre-rug
+    ("part75.py", 0, "SKIP"),  # Autonomic + journal public + MCP omni
+    ("part76.py", 0, "SKIP"),  # Autonomic + prerug bench + packaging
+    ("part77.py", 0, "SKIP"),  # Autonomic Breath
+    ("part78.py", 0, "SKIP"),  # Evidence discipline
     ("part79.py", 0, "SKIP"),  # Flag evidence labels
-    ("part80.py", 0, "SKIP"),  # Snapshot diff GET /diff
+    ("part80.py", 0, "SKIP"),  # Snapshot diff /diff
     ("part81.py", 0, "SKIP"),  # Omni-first agent packaging
+    ("part82.py", 0, "SKIP"),  # Daily journal + prerug bench public
 
-    ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP phải cuối
+    ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
 ]
 
 
