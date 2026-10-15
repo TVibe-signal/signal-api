@@ -32,6 +32,25 @@ async def _list_snapshot_ts(client, mint: str, limit: int = 300) -> List[int]:
         t = _ts_from_member(m)
         if t is not None and t not in out:
             out.append(t)
+    if not out:
+        # dự phòng: index zset rỗng/khác định dạng -> quét trực tiếp key snap:{mint}:*
+        try:
+            cursor = "0"
+            for _ in range(8):
+                res = await redis_pipe(client, [["SCAN", cursor, "MATCH", f"snap:{mint}:*", "COUNT", 500]])
+                part = (res or [None])[0]
+                if not part or len(part) < 2:
+                    break
+                cursor, keys = str(part[0]), (part[1] or [])
+                for k in keys:
+                    t = _ts_from_member(k)
+                    if t is not None and t not in out:
+                        out.append(t)
+                if cursor == "0":
+                    break
+            out.sort(reverse=True)
+        except Exception:
+            pass
     return out
 
 
@@ -142,10 +161,22 @@ async def compute_diff(client, mint: str, from_ts: Optional[int] = None, to_ts: 
 
     ts_list = await _list_snapshot_ts(client, mint)
     if len(ts_list) < 2:
+        dbg: Dict[str, Any] = {}
+        try:
+            zkey = SNAPSHOTS_ZSET.format(mint)
+            r2 = await redis_pipe(client, [["ZCARD", zkey], ["ZREVRANGE", zkey, 0, 2]])
+            dbg = {
+                "index_key": zkey,
+                "index_size": (r2 or [None])[0],
+                "index_sample": [repr(m)[:80] for m in ((r2 or [None, []])[1] or [])],
+            }
+        except Exception as e:
+            dbg = {"index_error": repr(e)[:120]}
         raise HTTPException(status_code=404, detail={
             "error": "Fewer than two snapshots stored for this token",
             "available_snapshots": len(ts_list),
             "hint": "Query /signal for this mint again later; each signal pull stores a snapshot.",
+            "debug": dbg,
         })
 
     new_ts = _nearest(ts_list, to_ts) if to_ts is not None else ts_list[0]
