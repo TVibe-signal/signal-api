@@ -1,10 +1,19 @@
 # TVibex402
 
-Free Solana token signal API for AI agents & bots.
+Solana token signals for **AI agents**. Heuristics, measured in public. **Not financial advice.**
 
-Market data from DexScreener · On-chain from Solana RPC · LP lock from RugCheck · Exit quotes from Jupiter.
+## For agents (start here)
 
-**Not financial advice.** Risk scores and verdicts are heuristics.
+| Use | Value |
+|-----|--------|
+| **Primary HTTP** | `GET https://signal-api-24q4.onrender.com/omni?mint=<MINT>` |
+| **MCP** | `https://signal-api-24q4.onrender.com/mcp` |
+| **MCP tool** | `omni(mint)` |
+| **Machine docs** | https://signal-api-24q4.onrender.com/llms.txt |
+| **Accuracy** | https://signal-api-24q4.onrender.com/stats |
+
+```bash
+curl "https://signal-api-24q4.onrender.com/omni?mint=So11111111111111111111111111111111111111112"
 
 ## Run locally
 
