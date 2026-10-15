@@ -85,10 +85,25 @@ def _collect_unknowns(r: dict) -> List[Dict[str, str]]:
     is_major = bool(r.get("is_major") or r.get("major"))
 
     has_lp, lp = _find(r, LP_KEYS)
-    if has_lp and lp is None and not is_major:
+    sec = r.get("security")
+    sec_ok = isinstance(sec, dict) and bool(sec.get("available"))
+    if lp is None and not is_major and (has_lp or sec_ok) and r.get("asset_class") in (None, "standard"):
         out.append(_unknown("lp_lock_unverified",
                             "LP lock status could not be verified; absence of a lock flag is not proof of a lock.",
                             "On-chain LP/locker lookup for this pool type"))
+
+    # cờ lp_unverified do app tự gắn (vd. pool PumpSwap) -> cũng là unknown
+    fl = r.get("flags") or r.get("risk_flags") or []
+    fids = set()
+    for f in fl if isinstance(fl, list) else []:
+        if isinstance(f, str):
+            fids.add(f)
+        elif isinstance(f, dict):
+            fids.add(str(f.get("id") or f.get("flag") or ""))
+    if "lp_unverified" in fids and not any(u["id"] == "lp_lock_unverified" for u in out):
+        out.append(_unknown("lp_lock_unverified",
+                            "LP burn/lock could not be verified for this pool; unverified is not the same as bad.",
+                            "Check the pool's LP tokens on a block explorer"))
 
     has_h, holders = _find(r, HOLDER_KEYS)
     if has_h and holders in (None, [], {}):
@@ -140,6 +155,15 @@ def _apply_discipline(result: dict) -> dict:
 
     unknowns = _collect_unknowns(r)
     r["unknowns"] = unknowns
+
+    # chế độ compact giữ `decision` nhưng bỏ trường top-level -> đưa các unknown chính vào decision.unknowns
+    dec = r.get("decision")
+    if isinstance(dec, dict):
+        extra = [u["detail"] for u in unknowns
+                 if u["id"] in ("lp_lock_unverified", "holders_unknown", "low_data_confidence")]
+        if extra:
+            have = list(dec.get("unknowns") or [])
+            dec["unknowns"] = have + [e for e in extra if e not in have]
 
     if UNKNOWN_CAP and unknowns and r.get("verdict") == "ok":
         r["verdict_raw"] = "ok"
