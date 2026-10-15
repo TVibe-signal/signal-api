@@ -48,28 +48,46 @@ def _rank_score(r: dict) -> float:
 
 _old_build_batch = build_batch if "build_batch" in globals() else None
 
-async def build_batch(client, raw_mints, security, *, sort="input", only=None, max_risk=None, top=None, view="full", charge=None):
+async def build_batch(client, raw_mints, security, *, sort="input", only=None,
+                      max_risk=None, top=None, view="full", charge=None,
+                      min_liq=None, max_age_minutes=None, min_volume_1h=None,
+                      **kw):
+    """Wrapper: giữ đủ bộ lọc của part13, xếp hạng lại, rồi mới cắt top."""
     if _old_build_batch is None:
         raise RuntimeError("build_batch not found")
+
+    rerank = sort in ("safest", "riskiest")
     out = await _old_build_batch(
         client, raw_mints, security,
         sort=sort, only=only, max_risk=max_risk,
-        top=top, view=view, charge=charge
+        top=None if rerank else top,   # nếu rerank thì cắt top sau
+        view=view, charge=charge,
+        min_liq=min_liq, max_age_minutes=max_age_minutes,
+        min_volume_1h=min_volume_1h, **kw
     )
 
     try:
         results = out.get("results") or []
-        if sort in ("safest", "riskiest") and results:
-            reverse = sort == "riskiest"
-            results.sort(key=_rank_score, reverse=reverse)
+        if rerank and results:
+            results.sort(key=_rank_score, reverse=(sort == "riskiest"))
+            before = len(results)
+            if top:
+                results = results[:int(top)]
             out["results"] = results
             out["rank_note"] = "ranked with community + private risk"
+            if "count" in out:
+                out["count"] = len(results)
+            if "filtered_out" in out:
+                out["filtered_out"] = int(out["filtered_out"]) + (before - len(results))
     except Exception:
         pass
     return out
 
-# ---------- 3. Health extras (cách an toàn, không đụng app.routes) ----------
+# ---------- 3. Health extras ----------
+# Đăng ký cả /health và /health/extras: nếu /health đã bị part trước chiếm
+# thì /health/extras vẫn chạy được.
 @app.get("/health", tags=["ops"], include_in_schema=False)
+@app.get("/health/extras", tags=["ops"], include_in_schema=False)
 async def health_with_extras(request: Request):
     data = {
         "status": "ok",
@@ -78,13 +96,14 @@ async def health_with_extras(request: Request):
 
     # Cố gắng lấy dữ liệu health gốc nếu có
     try:
-        # Gọi các hàm health cũ nếu tồn tại
         if "health" in globals() and callable(health):
             original = await health(request)
             if isinstance(original, dict):
                 data.update(original)
     except Exception:
         pass
+
+    data["version"] = VERSION  # không để hàm gốc ghi đè version
 
     try:
         # Seed info
