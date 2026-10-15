@@ -2,6 +2,8 @@
 
 Solana token signals for **AI agents**. Heuristics, measured in public. **Not financial advice.**
 
+Market data: DexScreener / GeckoTerminal · On-chain: Solana RPC · LP: RugCheck · Exit: Jupiter.
+
 ## For agents (start here)
 
 | Use | Value |
@@ -10,111 +12,9 @@ Solana token signals for **AI agents**. Heuristics, measured in public. **Not fi
 | **MCP** | `https://signal-api-24q4.onrender.com/mcp` |
 | **MCP tool** | `omni(mint)` |
 | **Machine docs** | https://signal-api-24q4.onrender.com/llms.txt |
+| **Agent page** | https://signal-api-24q4.onrender.com/agents |
 | **Accuracy** | https://signal-api-24q4.onrender.com/stats |
+| **Pattern benchmark** | https://signal-api-24q4.onrender.com/benchmark/prerug |
 
 ```bash
 curl "https://signal-api-24q4.onrender.com/omni?mint=So11111111111111111111111111111111111111112"
-
-## Run locally
-
-```bash
-pip install -r requirements.txt
-uvicorn main:app --reload --host 0.0.0.0 --port 8080
-curl "http://127.0.0.1:8080/signal?mint=So11111111111111111111111111111111111111112"
-Endpoints
-Method
-Path
-Description
-GET
-/
-Homepage (try live)
-GET
-/signal?mint=ADDRESS
-Full signal, verdict, decision object + holder_quality
-GET
-/signals?mints=A,B,C
-Smart batch (max 10), ranked
-GET
-/exit?mint=ADDRESS&sizes=100,1000
-Sell cost via Jupiter
-GET
-/stats
-Measured accuracy (JSON)
-GET
-/accuracy
-Human accuracy dashboard
-GET
-/methodology
-Exact rules, weights, baseline, limits
-GET
-/ledger
-Tamper-evident verdict ledger
-GET
-/pricing
-Plans and live rate limits
-GET
-/metrics
-Request counts, latency, source health
-GET
-/health
-Service status + what is switched on
-GET
-/whoami
-Client IP the server sees
-GET
-/llms.txt
-Agent-friendly docs
-GET
-/docs
-OpenAPI
-POST
-/mcp
-Remote MCP server (Claude & agents)
-What a signal contains
-Price, FDV, Market Cap, liquidity, pair age
-Price change 5m / 1h / 6h / 24h
-Volume + buy/sell pressure
-Risk score, flags, verdict (ok / caution / avoid)
-Decision object (blockers, cautions, positives, unknowns)
-Security: mint/freeze authority, holder concentration, LP lock
-Holder Quality (0–100) + flags: holders_stable, holders_churning, whale_accumulating, whale_dumping, dip_absorbed, weak_absorption
-Optional exit grade (when recently checked)
-Track-record context (when enough samples exist)
-Environment variables
-Variable
-Purpose
-SOLANA_RPC_URL
-Primary RPC (Helius / QuickNode recommended)
-SOLANA_RPC_FALLBACKS
-Comma-separated fallback RPCs
-UPSTASH_REDIS_REST_URL + UPSTASH_REDIS_REST_TOKEN
-Enable track record + ledger + holder cache
-JUPITER_API_KEY
-Higher Jupiter rate limit
-API_KEYS
-secret1:label1,secret2:label2 — higher rate via X-API-Key
-KEY_RATE_LIMIT
-Rate limit for keyed clients (default 300/min)
-AUTO_TUNE
-true to auto-adjust risk weights from measured outcomes
-TRUSTED_PROXY_HOPS
-Proxy hops for real client IP (Render = 1)
-GLOBAL_KEY_RESERVE
-Upstream requests/min reserved for keyed clients
-PYTHON_VERSION
-e.g. 3.12.7 or 3.14.3 for Render
-Rate limits
-Anonymous: 30 requests/min per IP
-With X-API-Key: higher (default 300/min)
-Global upstream budget protects DexScreener quota
-How the code is organised
-main.py is a small loader. The real code lives in part1.py … part18.py and runs in the order listed in main.py.
-part7.py (MCP server) always loads last. All files must sit in the same folder. The loader checks every part and tells you which lines to re-check if a copy went wrong.
-Deploy notes (Render)
-Start command: uvicorn main:app --host 0.0.0.0 --port $PORT
-Set PYTHON_VERSION if you need a specific Python
-After adding Redis env vars, check /health → track_record: true
-Honesty
-Verdicts are heuristics, not advice and not a security audit.
-A Jupiter quote does not prove a real sell will succeed.
-Only tokens that people query are measured.
