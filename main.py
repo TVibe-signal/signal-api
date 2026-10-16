@@ -98,6 +98,11 @@ _LOADER_PARTS = [
 ("part88.py", 0, "SKIP"),  # product + llms residual surface
     ("part89.py", 0, "SKIP"),  # offline feature export JSONL buffer
     ("part90.py", 0, "SKIP"),  # Shadow signals
+("part91.py", 0, "SKIP"),  # selection-bias / seed cohort panel
+    ("part92.py", 0, "SKIP"),  # multi-horizon surface
+    ("part93.py", 0, "SKIP"),  # shadow avoid-recall rules
+    ("part94.py", 0, "SKIP"),  # agent snippets + SI reading order
+    ("part95.py", 0, "SKIP"),  # key request + upstream status
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
 ]
 
