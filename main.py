@@ -95,6 +95,8 @@ _LOADER_PARTS = [
 ("part85.py", 0, "SKIP"),  # Attention Residual Fusion
     ("part86.py", 0, "SKIP"),  # Residual outcome learning
     ("part87.py", 0, "SKIP"),  # Pre-rug labeled_n on outcome
+("part88.py", 0, "SKIP"),  # product + llms residual surface
+    ("part89.py", 0, "SKIP"),  # offline feature export JSONL buffer
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
 ]
 
