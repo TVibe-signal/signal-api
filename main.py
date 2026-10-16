@@ -92,7 +92,9 @@ _LOADER_PARTS = [
     ("part82.py", 0, "SKIP"),  # Daily journal + prerug bench public
 ("part83.py", 0, "SKIP"),  # live-test fixes (v2.62.0)
 ("part84.py", 0, "SKIP"), 
-("part85.py", 0, "SKIP"),  # Attention Residual Fusion (AttnRes-style)
+("part85.py", 0, "SKIP"),  # Attention Residual Fusion
+    ("part86.py", 0, "SKIP"),  # Residual outcome learning
+    ("part87.py", 0, "SKIP"),  # Pre-rug labeled_n on outcome
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
 ]
 
