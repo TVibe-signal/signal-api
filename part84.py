@@ -40,6 +40,18 @@ def _fix_missing(r):
         t = d.get("top10_holders_pct")
         if isinstance(t, (int, float)) and not isinstance(t, bool) and t <= 0:
             d["top10_holders_pct"] = None
+    if not major and "top10_holders_pct" in r and r["top10_holders_pct"] is None:
+        dq = dict(r.get("data_quality") or {})
+        miss = list(dq.get("missing") or [])
+        if "top10_holders_pct" not in miss:
+            miss.append("top10_holders_pct")
+            dq["missing"] = miss
+            dq["completeness"] = "partial"
+            try:
+                dq["data_confidence"] = min(float(dq.get("data_confidence", 1.0)), 0.7)
+            except Exception:
+                dq["data_confidence"] = 0.7
+            r["data_quality"] = dq
     return r
 
 
