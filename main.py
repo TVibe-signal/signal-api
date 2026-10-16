@@ -91,8 +91,7 @@ _LOADER_PARTS = [
     ("part81.py", 0, "SKIP"),  # Omni-first agent packaging
     ("part82.py", 0, "SKIP"),  # Daily journal + prerug bench public
 ("part83.py", 0, "SKIP"),  # live-test fixes (v2.62.0)
-("part84.py", 0, "SKIP"),
-
+("part84.py", 0, "SKIP"), 
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
 ]
 
