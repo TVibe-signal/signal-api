@@ -106,6 +106,7 @@ _LOADER_PARTS = [
 ("part96.py", 0, "SKIP"),  # calibration fixes
 ("part97.py", 0, "SKIP"),  # /stats fixes
 ("part98.py", 0, "SKIP"),  # upstream counters + limiter
+("part99.py", 0, "SKIP"),  # evidence-calibrated reasoning
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
 ]
 
