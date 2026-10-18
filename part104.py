@@ -234,6 +234,40 @@ function debate(db){
 }
 function tile(label,val,c,sub,sc){return '<div class="r-tile '+(c||'')+'"><small>'+esc(label)+'</small><b>'+esc(val)+'</b>'+(sub?'<em class="'+(sc||'')+'">'+esc(sub)+'</em>':'')+'</div>'}
 
+function b58d(s){var A='123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz',n=BigInt(0),i;for(i=0;i<s.length;i++)n=n*BigInt(58)+BigInt(A.indexOf(s[i]));var hex=n.toString(16);if(hex.length%2)hex='0'+hex;var by=[];for(i=0;i<hex.length;i+=2)by.push(parseInt(hex.substr(i,2),16));var z=0;while(z<s.length&&s[z]==='1')z++;if(n===BigInt(0))by=[];return new Uint8Array(new Array(z).fill(0).concat(by))}
+function hexBytes(h){var o=new Uint8Array(h.length/2);for(var i=0;i<o.length;i++)o[i]=parseInt(h.substr(i*2,2),16);return o}
+async function verifyAtt(a,d){
+  var m=$('#vfmsg');
+  function say(t,c){if(m)m.innerHTML='<span style="font-weight:600;color:'+c+'">'+esc(t)+'</span>'}
+  try{
+    var rec=JSON.parse(a.canon);
+    if(rec.mint!==d.mint||rec.verdict!==(d.decision||{}).verdict)return say('The signed record does not match the verdict shown.','#ff6b64');
+    var dig=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(a.prev+a.canon));
+    var hex=Array.from(new Uint8Array(dig)).map(function(x){return ('0'+x.toString(16)).slice(-2)}).join('');
+    if(hex!==a.hash)return say('Hash does not match the record.','#ff6b64');
+    var key=await crypto.subtle.importKey('raw',b58d(a.pubkey),{name:'Ed25519'},false,['verify']);
+    var ok=await crypto.subtle.verify({name:'Ed25519'},key,hexBytes(a.sig),hexBytes(a.hash));
+    say(ok?'\u2714 Signature valid (checked in your browser)':'Signature is invalid.',ok?'#3df5ad':'#ff6b64');
+  }catch(e){say('This browser cannot check Ed25519. Use the steps at /attest.','#ffc94d')}
+}
+function survivalHtml(s){
+  if(!s)return '';
+  var b=find(s,/^bad_rate_by_horizon$/i,function(q){return q&&typeof q==='object'});
+  if(!b)return '';
+  var keys=Object.keys(b).filter(function(k){return /^\d+h$/.test(k)&&b[k]&&isNum(b[k].bad_rate_pct)}).sort(function(x,y){return parseInt(x)-parseInt(y)});
+  if(keys.length<2)return '';
+  var pts=[{l:'now',v:100}].concat(keys.map(function(k){return {l:k,v:100-b[k].bad_rate_pct}}));
+  var W=300,H=118,x0=24,x1=276,m=pts.length;
+  var xy=pts.map(function(p,i){return [x0+i*(x1-x0)/(m-1),96-(p.v/100)*72]});
+  var last=pts[m-1].v,c=last>=70?'#14f195':(last>=40?'#f5b73b':'#f2564f');
+  var path=xy.map(function(p,i){return (i?'L':'M')+p[0].toFixed(1)+' '+p[1].toFixed(1)}).join(' ');
+  var svg='<svg viewBox="0 0 '+W+' '+H+'" width="100%" role="img" aria-label="Survival of past tokens with this verdict"><path d="'+path+'" fill="none" stroke="'+c+'" stroke-width="3" stroke-linejoin="round"/>';
+  xy.forEach(function(p,i){svg+='<circle cx="'+p[0].toFixed(1)+'" cy="'+p[1].toFixed(1)+'" r="4" fill="'+c+'"/><text x="'+p[0].toFixed(1)+'" y="'+(p[1]-9).toFixed(1)+'" text-anchor="middle" font-size="11" font-weight="700" fill="#e8eefa">'+(Math.round(pts[i].v*10)/10)+'%</text><text x="'+p[0].toFixed(1)+'" y="112" text-anchor="middle" font-size="10" fill="#9db0ca">'+esc(pts[i].l)+'</text>'});
+  svg+='</svg>';
+  var ns=keys.map(function(k){return b[k].n}).filter(isNum);
+  var nmin=ns.length?Math.min.apply(null,ns):null;
+  return '<div class="r-h">Survival of similar verdicts <small>past outcomes, not a forecast</small></div><div class="r-box" style="margin:0">'+svg+'<p class="r-note" style="margin-top:.2rem">Share of past tokens with this verdict that had not collapsed after each time'+(nmin?' (smallest group n='+nmin+')':'')+'. Collapse means price down 50%+ or liquidity down 70%+.</p></div>';
+}
 function render(first){
   var d=st.d,s=st.s,x=st.x,dc=d.decision||{};
   var v=String(dc.verdict||'unknown').toLowerCase(),c=vc(v);
@@ -321,7 +355,7 @@ function render(first){
   if(chips)h+='<div class="r-chips">'+chips+'</div>';
   if(s&&s.source_note)h+='<p class="r-note">\u24D8 '+esc(s.source_note)+'</p>';
   var at2=d.attestation;
-  if(at2&&at2.sig)h+='<p class="r-note"><span class="num">\u2714 Signed #'+esc(at2.chain_n)+'</span> hash '+esc(String(at2.hash).slice(0,12))+'\u2026 \u00B7 <a href="/attest" target="_blank" rel="noopener">verify</a></p>';
+  if(at2&&at2.sig)h+='<p class="r-note"><span class="num">\u2714 Signed #'+esc(at2.chain_n)+'</span> hash '+esc(String(at2.hash).slice(0,12))+'\u2026 \u00B7 <button type="button" class="r-try" id="vf">Verify here</button> \u00B7 <a href="/attest" target="_blank" rel="noopener">how it works</a> <span id="vfmsg"></span></p>';
 
   if(tiles)h+='<div class="r-tiles">'+tiles+'</div>';
   if(st.pending>0)h+='<p class="r-note">Loading market data and sell cost...</p>';
@@ -331,6 +365,7 @@ function render(first){
     h+='<div class="r-h">Track record <small>similar past verdicts</small></div><div class="r-box"><div class="r-sell"><span>Ended badly'+(tr.horizon_hours?' ('+tr.horizon_hours+'h)':'')+'</span><div class="r-bar"><i class="'+bc+'" style="width:'+Math.min(100,Math.max(3,br))+'%"></i></div><b class="'+bc+'">'+(Math.round(br*10)/10)+'%</b></div><p class="r-note">'+(tr.n?'Based on '+tr.n+' judged tokens'+(tr.basis?' ('+esc(String(tr.basis).replace(/^judged tokens with /i,''))+')':'')+'. ':'')+(tr.ci95&&tr.ci95.length===2?'95% range '+tr.ci95[0]+' to '+tr.ci95[1]+'%. ':'')+esc(tr.meaning||'')+'</p></div>';
   }
 
+  h+=survivalHtml(s);
   var unk=(dc.unknowns||[]).filter(function(u){return !(sellHtml&&/Exit cost not checked/i.test(String(u)))});
   h+='<div class="r-h">Signals</div><div class="r-grid">';
   h+=group('Blockers','\u2716','bad',dc.blockers);
@@ -361,6 +396,7 @@ function render(first){
   $('#cj').onclick=function(){copy(raw,this)};
   $('#cl').onclick=function(){copy(location.origin+location.pathname+'?mint='+encodeURIComponent(st.mint),this)};
   $('#ca').onclick=function(){copy(d.mint||st.mint,this)};
+  if($('#vf'))$('#vf').onclick=function(){verifyAtt(at2,d)};
 }
 function showErr(m){out.innerHTML='<div class="r-err">'+esc(m)+'</div>'}
 function extra(url,key,my){
