@@ -267,7 +267,6 @@ function render(first){
   if(t10)tiles+=tile('Top 10 holders',t10[1]+'%',Number(t10[1])<25?'ok':(Number(t10[1])<50?'warn':'bad'));
   if(lp)tiles+=tile('LP locked or burned',lp[1]+'%',Number(lp[1])>=80?'ok':(Number(lp[1])>=50?'warn':'bad'));
   if(mcap!==undefined)tiles+=tile('Market cap',compact(mcap));
-  if(vol1!==undefined)tiles+=tile('Market cap',compact(mcap));
   if(vol1!==undefined)tiles+=tile('Volume 1h',compact(vol1));
   if(isNum(buys)&&isNum(sells))tiles+=tile('Buys / sells 5m',buys+' / '+sells,sells>buys*2?'warn':(buys>sells*2?'ok':''));
   var ow=/One wallet holds (\d+(?:\.\d+)?)%\+? of supply/i.exec(all);
@@ -402,6 +401,99 @@ if(q){inp.value=q;run(q)}
 })();
 '''
 
+PROOF_CSS = r"""
+#proof h2 small{font-family:var(--sans);font-size:.8rem;color:var(--muted);font-weight:500;margin-left:.5rem}
+.pf-tabs{display:flex;gap:.4rem;margin-bottom:.8rem}
+.pf-tabs button{cursor:pointer;border:1px solid var(--line);background:rgba(10,18,32,.8);color:var(--muted);border-radius:999px;padding:.3rem .85rem;font-size:.82rem;font-family:var(--sans)}
+.pf-tabs button.on{border-color:var(--a);color:var(--a)}
+.pf-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.6rem}
+.pf-card{background:var(--card);border:1px solid var(--line);border-radius:.9rem;padding:.8rem 1rem}
+.pf-card small{display:block;color:var(--muted);font-size:.8rem}
+.pf-card b{display:block;font-family:var(--disp);font-size:1.9rem;letter-spacing:-.02em;line-height:1.15}
+.pf-card.hl{border-color:rgba(20,241,149,.45);background:linear-gradient(135deg,rgba(20,241,149,.1),var(--card))}
+.pf-lead{margin:.9rem 0 .4rem;color:#cfdaec;font-size:.97rem;line-height:1.6}
+.pf-box{background:var(--card);border:1px solid var(--line);border-radius:.9rem;padding:.8rem 1rem;margin-top:.7rem}
+.pf-box h3{font-family:var(--disp);font-size:1rem;margin:0 0 .5rem}
+.pf-box h3 small{font-family:var(--sans);color:var(--muted);font-weight:500;font-size:.78rem;margin-left:.4rem}
+.pf-row{display:grid;grid-template-columns:92px 1fr 58px;gap:.15rem .6rem;align-items:center;margin:.5rem 0;font-size:.9rem}
+.pf-row small{grid-column:2/4;color:var(--muted);font-size:.75rem}
+.pf-row b{font-family:var(--mono);text-align:right;font-size:.88rem}
+.pf-bar{position:relative;height:10px;border-radius:99px;background:#0a1220}
+.pf-bar i{display:block;height:100%;border-radius:99px}
+.pf-bar i.ok{background:#14f195}.pf-bar i.warn{background:#f5b73b}.pf-bar i.bad{background:#f2564f}.pf-bar i.acc{background:linear-gradient(90deg,#9945ff,#14f195)}
+.pf-bar u{position:absolute;top:-3px;bottom:-3px;width:2px;background:#fff;opacity:.55}
+.pf-rules{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:.6rem;margin-top:.7rem}
+.pf-rule{background:var(--card);border:1px solid var(--line);border-radius:.9rem;padding:.8rem 1rem}
+.pf-rule.hi{border-color:rgba(153,69,255,.65)}
+.pf-rule h4{margin:0;font-family:var(--disp);font-size:1rem}
+.pf-rule p{margin:.15rem 0 .4rem;color:var(--muted);font-size:.78rem}
+.pf-m{display:grid;grid-template-columns:1fr 52px;gap:.2rem .5rem;margin:.55rem 0;font-size:.82rem;align-items:center}
+.pf-m span{grid-column:1/3;color:#c4d0e4}
+.pf-m b{font-family:var(--mono);text-align:right;font-size:.85rem}
+.pf-m small{grid-column:1/3;color:var(--muted);font-size:.72rem}
+#proof details{margin-top:.7rem;color:var(--muted);font-size:.84rem}
+#proof details summary{cursor:pointer}
+#proof details li{margin:.3rem 0}
+"""
+
+PROOF_JS = r'''
+(function(){
+var sec=document.getElementById('proof');if(!sec)return;
+var body=document.getElementById('pf-body'),tabs=document.getElementById('pf-tabs');
+var DATA=null,cur='all_tracked';
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function num(x){return typeof x==='number'&&isFinite(x)}
+function r1(x){return Math.round(x*10)/10}
+function load(u){return fetch(u,{headers:{'Accept':'application/json'}}).then(function(r){return r.ok?r.json():null}).catch(function(){return null})}
+function cls(v){return v<40?'ok':(v<70?'warn':'bad')}
+function bar(v,c,base){return '<div class="pf-bar"><i class="'+c+'" style="width:'+Math.max(2,Math.min(100,v))+'%"></i>'+(num(base)?'<u style="left:'+Math.min(99,base)+'%" title="base rate"></u>':'')+'</div>'}
+function ci(a){return (a&&a.length===2)?'95% range '+a[0]+' to '+a[1]+'%':''}
+function metric(label,v,c,sub){if(!num(v))return '';return '<div class="pf-m"><span>'+esc(label)+'</span>'+bar(v,c)+'<b>'+r1(v)+'%</b>'+(sub?'<small>'+esc(sub)+'</small>':'')+'</div>'}
+function rule(title,note,o,hi){
+  if(!o||!num(o.precision_pct))return '';
+  return '<div class="pf-rule'+(hi?' hi':'')+'"><h4>'+esc(title)+'</h4><p>'+esc(note)+' \u00B7 flagged '+esc(o.flagged)+' tokens</p>'
+   +metric('Right when it flags',o.precision_pct,'acc',ci(o.precision_ci95_pct))
+   +metric('Bad outcomes it catches',o.recall_pct,'acc')
+   +metric('Good tokens wrongly flagged',o.false_positive_rate_pct,'warn')+'</div>';
+}
+function draw(){
+  var P=DATA.performance||{},p=P[cur];if(!p){body.innerHTML='';return}
+  var base=p.judged?p.bad_outcomes/p.judged*100:null,oa=p.ours_avoid||{},ba=p.baseline_avoid||{},oc=p.ours_avoid_or_caution||{};
+  var h='';
+  if(num(oa.precision_pct)&&num(base)){
+    h+='<div class="pf-cards"><div class="pf-card hl"><small>Avoid is right</small><b>'+r1(oa.precision_pct)+'%</b><small>'+esc(ci(oa.precision_ci95_pct))+'</small></div>'
+     +'<div class="pf-card"><small>Base rate, all tracked tokens</small><b>'+r1(base)+'%</b><small>ended badly within '+esc(DATA.horizon_hours||24)+'h</small></div>'
+     +'<div class="pf-card"><small>Avoid beats the base rate by</small><b>+'+r1(oa.precision_pct-base)+' pts</b><small>'+esc(p.judged)+' verdicts judged</small></div></div>';
+    h+='<p class="pf-lead">Most tokens in this sample fail, so a good verdict must beat <b>'+r1(base)+'%</b>. Avoid reaches <b>'+r1(oa.precision_pct)+'%</b> but catches only <b>'+r1(oa.recall_pct)+'%</b> of bad outcomes.'
+     +(num(ba.precision_pct)?' A simple baseline rule catches '+r1(ba.recall_pct)+'% but is right '+r1(ba.precision_pct)+'% of the time and wrongly flags '+r1(ba.false_positive_rate_pct)+'% of good tokens.':'')+'</p>';
+  }
+  var V=p.verdicts||{},vr='';
+  [['ok','OK','ok'],['caution','Caution','warn'],['avoid','Avoid','bad']].forEach(function(x){
+    var v=V[x[0]];if(v&&num(v.bad_outcome_rate_pct))vr+='<div class="pf-row"><span>'+x[1]+'</span>'+bar(v.bad_outcome_rate_pct,x[2],base)+'<b>'+r1(v.bad_outcome_rate_pct)+'%</b><small>n='+esc(v.n)+(v.ci95_pct?' \u00B7 '+esc(ci(v.ci95_pct)):'')+'</small></div>';
+  });
+  if(vr)h+='<div class="pf-box"><h3>Bad outcome rate by verdict <small>white line = base rate</small></h3>'+vr+'</div>';
+  var rr=rule('Our avoid','Verdict "avoid"',oa,true)+rule('Baseline rule','Simple liquidity and age rule',ba,false)+rule('Our avoid + caution','Anything not OK',oc,false);
+  if(rr)h+='<div class="pf-rules">'+rr+'</div>';
+  var B=DATA.by_risk_bucket||[],br='';
+  B.forEach(function(b){if(num(b.bad_outcome_rate_pct))br+='<div class="pf-row"><span>Risk '+esc(b.risk_score_range)+'</span>'+bar(b.bad_outcome_rate_pct,cls(b.bad_outcome_rate_pct),base)+'<b>'+r1(b.bad_outcome_rate_pct)+'%</b><small>n='+esc(b.n)+'</small></div>'});
+  if(br)h+='<div class="pf-box"><h3>Does a higher risk score mean more failures? <small>all tracked</small></h3>'+br+'</div>';
+  var cv=(DATA.caveats||[]).slice(0,2).map(function(c){return '<li>'+esc(c)+'</li>'}).join('');
+  h+='<details><summary>How to read this</summary><ul>'+(DATA.bad_outcome_definition?'<li>Bad outcome: '+esc(DATA.bad_outcome_definition)+'.</li>':'')+cv+'<li>'+esc(DATA.resolved||0)+' verdicts judged, '+esc(DATA.pending||0)+' still waiting for their 24h result.</li></ul></details>';
+  body.innerHTML=h;
+}
+function tabsDraw(){
+  var P=DATA.performance||{},t='';
+  [['all_tracked','All time'],['last_7d','Last 7 days']].forEach(function(x){if(P[x[0]])t+='<button type="button" data-k="'+x[0]+'" class="'+(cur===x[0]?'on':'')+'">'+x[1]+(P[x[0]].days_covered?' ('+P[x[0]].days_covered+'d)':'')+'</button>'});
+  tabs.innerHTML=t;
+}
+tabs.addEventListener('click',function(e){var b=e.target.closest('button');if(!b||!DATA)return;cur=b.getAttribute('data-k');tabsDraw();draw()});
+load('/stats').then(function(j){return (j&&j.performance)?j:load('/accuracy')}).then(function(j){
+  if(!j||!j.performance){sec.style.display='none';return}
+  DATA=j;tabsDraw();draw();
+});
+})();
+'''
+
 HOME_HTML = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -532,6 +624,7 @@ footer {{
 }}
 footer a {{ color: var(--a) }}
 {CHECK_CSS}
+{PROOF_CSS}
 </style>
 </head>
 <body>
@@ -593,6 +686,13 @@ footer a {{ color: var(--a) }}
     <div><b>Public record</b><span>accuracy on /stats</span></div>
     <div><b>MCP ready</b><span>Claude, Cursor, agents</span></div>
   </div>
+
+  <section id="proof">
+    <h2>Live accuracy <small>measured on real verdicts, not a backtest</small></h2>
+    <div class="pf-tabs" id="pf-tabs"></div>
+    <div id="pf-body"><p class="muted">Loading live accuracy...</p></div>
+    <p class="muted" style="margin-top:.7rem;font-size:.85rem"><a href="/stats" style="color:var(--a)">Full numbers</a> · <a href="/attest" style="color:var(--a)">Verify signed verdicts</a></p>
+  </section>
 
   <div class="grid">
     <div class="card">
@@ -665,6 +765,7 @@ footer a {{ color: var(--a) }}
   </footer>
 </div>
 <script>{CHECK_JS}</script>
+<script>{PROOF_JS}</script>
 </body>
 </html>
 """
