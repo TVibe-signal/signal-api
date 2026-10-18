@@ -112,6 +112,7 @@ _LOADER_PARTS = [
 ("part102.py", 0, "SKIP"),  # brand + motion
 ("part103.py", 0, "SKIP"),  # agent-first home + donate SOL
 ("part104.py", 0, "SKIP"),  # TVibe home + mint check + donate
+("part105.py", 0, "SKIP"),
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
 ]
 
