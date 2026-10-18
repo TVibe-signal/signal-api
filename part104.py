@@ -1,5 +1,5 @@
 # ---------- v2.84: TVibe home - X link, inline mint check (no raw JSON), color-coded result ----------
-VERSION = "2.84.0"
+VERSION = "2.85.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -28,14 +28,32 @@ Optional SOL tip (never required):
 
 # Plain (non f-string) blocks: no need to double the braces here.
 CHECK_CSS = r"""
-nav .pill{display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--line);background:rgba(15,22,34,.7);color:var(--text);padding:.3rem .7rem;border-radius:.65rem;margin-left:.6rem}
-nav .pill:hover{border-color:var(--a)}
+body{background-image:linear-gradient(rgba(255,255,255,.022) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.022) 1px,transparent 1px);background-size:46px 46px;background-position:center top}
+nav{position:sticky;top:0;z-index:30;background:rgba(7,11,18,.72);-webkit-backdrop-filter:blur(14px);backdrop-filter:blur(14px)}
+nav a{margin-left:0;padding:.38rem .65rem;border-radius:.6rem}
+nav a:hover{background:rgba(255,255,255,.05)}
+.navlinks{display:flex;gap:.2rem;align-items:center;flex-wrap:wrap}
+nav .pill{display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--line);background:rgba(15,22,34,.75);color:var(--text);margin-left:.25rem}
+nav .pill:hover{border-color:var(--a);background:rgba(20,241,149,.07)}
 .ic{width:15px;height:15px;fill:currentColor;flex:none}
-.logo{display:flex;align-items:center;gap:.5rem}
-.logo img{width:26px;height:26px;border-radius:7px}
+@media(max-width:600px){nav{flex-direction:column;align-items:flex-start}.navlinks{width:100%;flex-wrap:nowrap;overflow-x:auto;scrollbar-width:none;padding-bottom:.15rem}.navlinks::-webkit-scrollbar{display:none}.navlinks a{white-space:nowrap}}
 footer a.fx{display:inline-flex;align-items:center;gap:.3rem}
-.hint button{background:none;border:0;color:var(--a);cursor:pointer;font:inherit;padding:0}
+.hero h1{letter-spacing:-.045em}
+.check{max-width:720px;background:linear-gradient(var(--card),var(--card)) padding-box,linear-gradient(135deg,rgba(153,69,255,.7),rgba(20,241,149,.55)) border-box;border:1px solid transparent;box-shadow:0 24px 60px -24px rgba(99,102,241,.45)}
+.check h3{font-size:1.05rem}
+.check form{flex-wrap:nowrap}
+.check form .btn{padding:.7rem 1.05rem;white-space:nowrap}
+.check input:focus{outline:none;border-color:var(--a);box-shadow:0 0 0 3px rgba(20,241,149,.12)}
 .check form button:disabled{opacity:.6;cursor:wait}
+.tryrow{display:flex;flex-wrap:wrap;gap:.4rem;align-items:center;margin-top:.7rem;font-size:.8rem;color:var(--muted)}
+.r-try{cursor:pointer;border:1px solid var(--line);background:rgba(10,18,32,.8);color:var(--text);border-radius:999px;padding:.25rem .7rem;font-size:.78rem}
+.r-try:hover{border-color:var(--a);color:var(--a)}
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:.6rem;margin:1.2rem 0}
+.strip div{border:1px solid var(--line);background:rgba(15,22,34,.6);border-radius:.8rem;padding:.65rem .85rem}
+.strip b{display:block;font-size:.92rem}
+.strip span{font-size:.78rem;color:var(--muted)}
+.card{transition:border-color .2s}
+.card:hover{border-color:rgba(20,241,149,.4)}
 #out{margin-top:1rem;text-align:left}
 .r-load{display:flex;align-items:center;gap:.6rem;color:var(--muted);font-size:.88rem;padding:.6rem .2rem}
 .r-spin{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--a);border-radius:50%;animation:rsp .8s linear infinite;flex:none}
@@ -43,34 +61,43 @@ footer a.fx{display:inline-flex;align-items:center;gap:.3rem}
 .r-err{border:1px solid #6e2523;background:rgba(46,17,18,.8);color:#ffb4b0;border-radius:.75rem;padding:.7rem .9rem;font-size:.88rem}
 .res{animation:rin .35s ease both}
 @keyframes rin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
-.r-hero{display:flex;gap:1rem;align-items:center;border-radius:.9rem;padding:1rem;border:1px solid var(--line);background:rgba(17,27,43,.9)}
-.r-hero.ok{border-color:rgba(20,241,149,.45);background:linear-gradient(135deg,rgba(20,241,149,.13),rgba(15,22,34,.9))}
+.r-hero{display:flex;gap:1.1rem;align-items:center;border-radius:1rem;padding:1.1rem;border:1px solid var(--line);background:rgba(17,27,43,.9)}
+.r-hero.ok{border-color:rgba(20,241,149,.45);background:linear-gradient(135deg,rgba(20,241,149,.14),rgba(15,22,34,.9))}
 .r-hero.warn{border-color:rgba(245,183,59,.5);background:linear-gradient(135deg,rgba(245,183,59,.14),rgba(15,22,34,.9))}
 .r-hero.bad{border-color:rgba(242,86,79,.55);background:linear-gradient(135deg,rgba(242,86,79,.15),rgba(15,22,34,.9))}
-.r-ring{position:relative;width:84px;height:84px;flex:none}
-.r-ring svg{width:84px;height:84px;transform:rotate(-90deg)}
+.r-ring{position:relative;width:88px;height:88px;flex:none}
+.r-ring svg{width:88px;height:88px;transform:rotate(-90deg)}
 .r-ring circle{fill:none;stroke-width:8;stroke-linecap:round}
 .r-ring .bg{stroke:rgba(255,255,255,.09)}
 .r-ring .fg{transition:stroke-dashoffset .9s cubic-bezier(.2,.8,.2,1)}
-.r-ring.ok .fg{stroke:#14f195}.r-ring.warn .fg{stroke:#f5b73b}.r-ring.bad .fg{stroke:#f2564f}
-.r-ring span{position:absolute;inset:0;display:grid;place-items:center;font-weight:800;font-size:1.35rem;align-content:center}
-.r-ring small{display:block;font-size:.62rem;color:var(--muted);font-weight:500;text-align:center;margin-top:-2px}
+.r-ring.ok .fg{stroke:#14f195}.r-ring.warn .fg{stroke:#f5b73b}.r-ring.bad .fg{stroke:#f2564f}.r-ring.mut .fg{stroke:#8b9bb4}
+.r-ring .n{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-weight:800;font-size:1.45rem;line-height:1}
+.r-ring .n small{font-size:.62rem;color:var(--muted);font-weight:500;margin-top:.2rem}
 .r-vtxt{min-width:0}
-.r-big{font-size:1.6rem;font-weight:800;letter-spacing:-.02em;display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
-.r-tok{font-size:.88rem;color:var(--muted);font-weight:500}
-.r-vtxt p{margin:.3rem 0 0;color:#c9d4e6;font-size:.88rem}
+.r-big{font-size:1.65rem;font-weight:800;letter-spacing:-.025em;display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
+.r-tok{font-size:.9rem;color:var(--muted);font-weight:600;border:1px solid var(--line);border-radius:.5rem;padding:.05rem .5rem}
+.r-vtxt p{margin:.35rem 0 0;color:#c9d4e6;font-size:.88rem}
 .r-dot{width:12px;height:12px;border-radius:50%;display:inline-block}
 .ok .r-dot{background:#14f195;box-shadow:0 0 12px #14f195}
 .warn .r-dot{background:#f5b73b;box-shadow:0 0 12px #f5b73b}
 .bad .r-dot{background:#f2564f;box-shadow:0 0 12px #f2564f}
-.r-mint{margin:.6rem .1rem 0;font-size:.75rem;color:var(--muted);word-break:break-all;font-family:ui-monospace,monospace}
-.r-chips{display:flex;flex-wrap:wrap;gap:.45rem;margin:.75rem 0 .2rem}
+.r-mint{margin:.7rem .1rem 0;font-size:.74rem;color:var(--muted);word-break:break-all;font-family:ui-monospace,monospace}
+.r-links{display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.5rem}
+.r-links .btn,.r-tools .btn{padding:.4rem .8rem;font-size:.8rem;border-radius:.6rem}
+.r-chips{display:flex;flex-wrap:wrap;gap:.45rem;margin:.8rem 0 .2rem}
 .r-chip{display:inline-flex;align-items:center;gap:.35rem;border-radius:999px;padding:.2rem .65rem;font-size:.78rem;border:1px solid var(--line);background:rgba(10,18,32,.8);color:var(--muted)}
 .r-chip.ok{color:#14f195;border-color:rgba(20,241,149,.4);background:rgba(11,32,22,.8)}
 .r-chip.warn{color:#f5b73b;border-color:rgba(245,183,59,.45);background:rgba(34,26,9,.8)}
 .r-chip.bad{color:#f2564f;border-color:rgba(242,86,79,.5);background:rgba(36,14,15,.8)}
-.r-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-top:.6rem}
-@media(max-width:640px){.r-grid{grid-template-columns:1fr}.r-hero{flex-direction:column;align-items:flex-start}}
+.r-h{margin:1.1rem 0 .5rem;font-size:.95rem;font-weight:700;display:flex;align-items:center;gap:.5rem}
+.r-h small{font-weight:500;color:var(--muted);font-size:.75rem}
+.r-tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.55rem;margin-top:.8rem}
+.r-tile{background:rgba(17,27,43,.9);border:1px solid var(--line);border-top:2px solid var(--line);border-radius:.75rem;padding:.6rem .75rem}
+.r-tile small{display:block;font-size:.72rem;color:var(--muted)}
+.r-tile b{font-size:1.12rem;letter-spacing:-.01em}
+.r-tile.ok{border-top-color:#14f195}.r-tile.warn{border-top-color:#f5b73b}.r-tile.bad{border-top-color:#f2564f}
+.r-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;align-items:start}
+@media(max-width:640px){.r-grid{grid-template-columns:1fr}.r-hero{flex-direction:column;align-items:flex-start}.check form{flex-wrap:wrap}}
 .r-grp,.r-box{background:rgba(17,27,43,.9);border:1px solid var(--line);border-radius:.8rem;padding:.7rem .85rem}
 .r-grp h4,.r-box h3{margin:0 0 .5rem;font-size:.88rem;display:flex;align-items:center;gap:.5rem}
 .r-grp h4 b{margin-left:auto;font-size:.75rem;color:var(--muted);font-weight:600}
@@ -89,8 +116,15 @@ footer a.fx{display:inline-flex;align-items:center;gap:.3rem}
 .r-prow .r-chip{align-self:flex-start;min-width:72px;justify-content:center}
 .r-prow p{margin:.15rem 0 0;font-size:.8rem;color:var(--muted)}
 .r-prow small{color:var(--muted)}
-.r-tools{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.8rem}
-.r-tools .btn{padding:.45rem .85rem;font-size:.82rem}
+.r-sell{display:grid;grid-template-columns:auto 1fr auto;gap:.5rem .75rem;align-items:center;margin-top:.6rem;font-size:.85rem}
+.r-bar{height:8px;border-radius:99px;background:#0a1220;overflow:hidden}
+.r-bar i{display:block;height:100%;border-radius:99px}
+.r-bar i.ok{background:#14f195}.r-bar i.warn{background:#f5b73b}.r-bar i.bad{background:#f2564f}
+.r-sell .ok{color:#14f195}.r-sell .warn{color:#f5b73b}.r-sell .bad{color:#f2564f}
+.r-note{font-size:.78rem;color:var(--muted);margin:.5rem 0 0}
+.r-next{margin:0;padding-left:1.1rem;font-size:.85rem;color:#c9d4e6}
+.r-next li{margin:.25rem 0}
+.r-tools{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:1rem}
 details.r-raw{margin-top:.6rem;background:#08101c;border:1px solid var(--line);border-radius:.65rem;padding:.5rem .75rem}
 details.r-raw summary{cursor:pointer;color:var(--muted);font-size:.82rem}
 details.r-raw pre{margin:.5rem 0 0;max-height:300px;overflow:auto;font-size:.75rem}
@@ -100,21 +134,43 @@ details.r-raw pre{margin:.5rem 0 0;max-height:300px;overflow:auto;font-size:.75r
 CHECK_JS = r'''
 (function(){
 var $=function(s){return document.querySelector(s)};
-var out=$('#out'),inp=$('#mint'),btn=$('#go'),lastJSON='';
+var out=$('#out'),inp=$('#mint'),btn=$('#go');
 var B58=/^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-var SOL='So11111111111111111111111111111111111111112';
+var st=null,token=0;
 function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
 function vc(v){return {ok:'ok',caution:'warn',avoid:'bad'}[String(v||'').toLowerCase()]||'mut'}
 function pct(x){return Math.round((Number(x)||0)*100)}
 function chip(t,c){return '<span class="r-chip '+(c||'')+'">'+esc(t)+'</span>'}
+function isNum(v){return typeof v==='number'&&isFinite(v)}
+function tidy(s){return String(s==null?'':s).replace(/\s*\([^()]*\u03b1=\{[^}]*\}\)/,'')}
 function copy(text,el){
   function done(){if(el){var o=el.textContent;el.textContent='Copied';setTimeout(function(){el.textContent=o},1200)}}
   function fb(){var t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();try{document.execCommand('copy')}catch(e){}t.remove();done()}
   if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done,fb)}else fb();
 }
+function find(o,re,pred,d){
+  d=d||0;if(!o||typeof o!=='object'||d>4)return undefined;var k,v;
+  for(k in o){if(re.test(k)){v=o[k];if(pred(v))return v}}
+  for(k in o){v=o[k];if(v&&typeof v==='object'){var r=find(v,re,pred,d+1);if(r!==undefined)return r}}
+  return undefined;
+}
+function findSizes(o,d){
+  d=d||0;if(!o||typeof o!=='object'||d>4)return null;
+  if(Array.isArray(o)&&o.length&&o[0]&&typeof o[0]==='object'){
+    var ks=Object.keys(o[0]);
+    var a=ks.filter(function(k){return /usd|size|amount|notional/i.test(k)&&isNum(o[0][k])})[0];
+    var b=ks.filter(function(k){return /loss|impact|slip|cost/i.test(k)&&isNum(o[0][k])})[0];
+    if(a&&b)return o.map(function(it){return {size:it[a],loss:it[b],lk:b}});
+  }
+  for(var k in o){var r=findSizes(o[k],d+1);if(r)return r}
+  return null;
+}
+function lossPct(v,k){v=Number(v);if(/bps/i.test(k))return v/100;if(/pct|percent/i.test(k))return v;return Math.abs(v)<=1?v*100:v}
+function fmtUsd(n){return '$'+Number(n).toLocaleString('en-US',{maximumFractionDigits:0})}
+function fmtPrice(n){n=Number(n);return '$'+(n>=1?n.toLocaleString('en-US',{maximumFractionDigits:2}):n.toPrecision(4))}
 function group(title,sym,c,arr){
   if(!Array.isArray(arr)||!arr.length)return '';
-  var li=arr.map(function(x){return '<li>'+esc(typeof x==='string'?x:(x.label||x.id||JSON.stringify(x)))+'</li>'}).join('');
+  var li=arr.map(function(x){return '<li>'+esc(tidy(typeof x==='string'?x:(x.label||x.id||JSON.stringify(x))))+'</li>'}).join('');
   return '<div class="r-grp '+c+'"><h4><span class="r-sym">'+sym+'</span>'+title+'<b>'+arr.length+'</b></h4><ul>'+li+'</ul></div>';
 }
 function debate(db){
@@ -128,16 +184,66 @@ function debate(db){
   var ag=db.agreement_weighted!=null?db.agreement_weighted:db.agreement;
   return '<section class="r-box r-full" style="margin:0"><h3>Agent debate '+chip(db.meta_verdict,vc(db.meta_verdict))+'<span style="margin-left:auto;font-weight:500;font-size:.75rem;color:var(--muted)">agreement '+pct(ag)+'%</span></h3><div class="r-vbar">'+bar+'</div>'+rows+'</section>';
 }
-function render(d){
-  var dc=d.decision||{},v=String(dc.verdict||'unknown').toLowerCase(),c=vc(v);
-  var risk=Number(dc.risk_score),hasRisk=isFinite(risk)&&dc.risk_score!=null;
+function tile(label,val,c){return '<div class="r-tile '+(c||'')+'"><small>'+esc(label)+'</small><b>'+esc(val)+'</b></div>'}
+
+function render(first){
+  var d=st.d,s=st.s,x=st.x,dc=d.decision||{};
+  var v=String(dc.verdict||'unknown').toLowerCase(),c=vc(v);
+  var risk=Number(dc.risk_score),hasRisk=dc.risk_score!=null&&isFinite(risk);
   var rc=!hasRisk?'mut':(risk<35?'ok':(risk<65?'warn':'bad'));
   var C=2*Math.PI*34,off=hasRisk?C*(1-Math.min(100,Math.max(0,risk))/100):C;
-  var label={ok:'OK',caution:'Caution',avoid:'Avoid'}[v]||v;
+  var label={ok:'Looks OK',caution:'Use caution',avoid:'High risk'}[v]||v;
+  var all=[].concat(dc.positives||[],dc.cautions||[],dc.blockers||[]).join(' | ');
+  var src=[s,d];
+  function pick(re,pred){for(var i=0;i<src.length;i++){var r=find(src[i],re,pred);if(r!==undefined)return r}}
+
+  var liq=pick(/^(liquidity(_usd)?|liq_usd)$/i,isNum);
+  if(liq===undefined){var m1=/Liquidity \$([\d,]+)/.exec(d.summary||'');if(m1)liq=Number(m1[1].replace(/,/g,''))}
+  var price=pick(/^(price(_usd)?|priceusd)$/i,isNum);
+  var age=pick(/^(pair_age_days|age_days|pair_age_d|pair_age)$/i,isNum);
+  var hq=pick(/^holder_quality(_score)?$/i,function(q){return isNum(q)||(q&&isNum(q.score))});
+  if(hq&&typeof hq==='object')hq=hq.score;
+  var t10=/Top 10 holders own (?:only )?(\d+(?:\.\d+)?)%/i.exec(all);
+  var lp=/(\d+(?:\.\d+)?)% of liquidity locked/i.exec(all);
+
+  var tiles='';
+  if(liq!==undefined)tiles+=tile('Liquidity',fmtUsd(liq),liq>=100000?'ok':(liq>=20000?'warn':'bad'));
+  if(price!==undefined)tiles+=tile('Price',fmtPrice(price));
+  if(age!==undefined)tiles+=tile('Pair age',age<1?Math.max(1,Math.round(age*24))+' h':(Math.round(age*10)/10)+' d',age<1?'bad':(age<7?'warn':'ok'));
+  if(hq!==undefined)tiles+=tile('Holder quality',Math.round(hq)+' / 100',hq>=60?'ok':(hq>=40?'warn':'bad'));
+  if(t10)tiles+=tile('Top 10 holders',t10[1]+'%',Number(t10[1])<25?'ok':(Number(t10[1])<50?'warn':'bad'));
+  if(lp)tiles+=tile('LP locked or burned',lp[1]+'%',Number(lp[1])>=80?'ok':(Number(lp[1])>=50?'warn':'bad'));
+
+  var flags=s?find(s,/^flags$/i,Array.isArray):undefined;
+  var flagHtml='';
+  if(flags&&flags.length)flagHtml='<div class="r-h">Flags</div><div class="r-chips" style="margin-top:0">'+flags.map(function(f){return chip(typeof f==='string'?f:(f.label||f.id||f.name||''),'warn')}).join('')+'</div>';
+
+  var sellHtml='';
+  if(x){
+    var sizes=findSizes(x);
+    var grade=find(x,/^(exit_)?grade$/i,function(q){return typeof q==='string'});
+    var overall=find(x,/^(overall|overall_verdict|verdict)$/i,function(q){return typeof q==='string'});
+    if(sizes&&sizes.length||grade){
+      sellHtml='<div class="r-h">Cost to sell <small>Jupiter quote</small></div>';
+      var gc=/good|ok|low/i.test(grade||'')?'ok':(/fair|medium|mid|warn|caution/i.test(grade||'')?'warn':(grade?'bad':''));
+      var oc=overall?vc(overall):'';
+      sellHtml+='<div class="r-chips" style="margin-top:0">'+(grade?chip('Exit grade: '+grade,gc):'')+(overall?chip('Overall: '+overall,oc==='mut'?'':oc):'')+'</div>';
+      if(sizes&&sizes.length){
+        sellHtml+='<div class="r-sell">'+sizes.slice(0,6).map(function(z){
+          var l=lossPct(z.loss,z.lk),lc=l<3?'ok':(l<8?'warn':'bad');
+          return '<span>Sell '+fmtUsd(z.size)+'</span><div class="r-bar"><i class="'+lc+'" style="width:'+Math.min(100,Math.max(3,l*4))+'%"></i></div><b class="'+lc+'">'+(Math.round(l*10)/10)+'% lost</b>';
+        }).join('')+'</div>';
+      }
+      sellHtml+='<p class="r-note">A quote does not prove a real sell will succeed.</p>';
+    }
+  }
+
   var h='<div class="res">';
-  h+='<div class="r-hero '+c+'"><div class="r-ring '+rc+'"><svg viewBox="0 0 84 84"><circle class="bg" cx="42" cy="42" r="34"/><circle class="fg" id="fg" cx="42" cy="42" r="34" stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+C.toFixed(1)+'" data-off="'+off.toFixed(1)+'"/></svg><span><div>'+(hasRisk?risk:'?')+'<small>risk</small></div></span></div>';
-  h+='<div class="r-vtxt"><div class="r-big"><i class="r-dot"></i>'+esc(label)+'<span class="r-tok">'+esc(d.token||'')+'</span></div><p>'+esc(d.summary||'')+'</p></div></div>';
-  h+='<div class="r-mint">'+esc(d.mint||'')+'</div>';
+  h+='<div class="r-hero '+c+'"><div class="r-ring '+rc+'"><svg viewBox="0 0 88 88" width="88" height="88"><circle class="bg" cx="44" cy="44" r="34"/><circle class="fg" id="fg" cx="44" cy="44" r="34" stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+(first?C.toFixed(1):off.toFixed(1))+'" data-off="'+off.toFixed(1)+'"/></svg><div class="n">'+(hasRisk?risk:'?')+'<small>risk / 100</small></div></div>';
+  h+='<div class="r-vtxt"><div class="r-big"><i class="r-dot"></i>'+esc(label)+'<span class="r-tok">'+esc(d.token||'')+'</span></div><p>'+esc(tidy(d.summary||''))+'</p></div></div>';
+  h+='<div class="r-mint">'+esc(d.mint||st.mint)+'</div>';
+  h+='<div class="r-links"><button type="button" class="btn btn-o" id="ca">Copy address</button><a class="btn btn-o" href="https://dexscreener.com/solana/'+encodeURIComponent(d.mint||st.mint)+'" target="_blank" rel="noopener noreferrer">DexScreener</a><a class="btn btn-o" href="https://solscan.io/token/'+encodeURIComponent(d.mint||st.mint)+'" target="_blank" rel="noopener noreferrer">Solscan</a></div>';
+
   var chips='';
   if(d.regime&&d.regime.name)chips+=chip('Regime: '+d.regime.name+' ('+pct(d.regime.confidence)+'%)',/risk_off/.test(d.regime.name)?'warn':(/risk_on/.test(d.regime.name)?'ok':''));
   if(d.attention_trap)chips+=chip('Attention trap','warn');
@@ -148,42 +254,73 @@ function render(d){
   var at=d.community&&d.community.attention;
   if(at&&at['24h']!=null)chips+=chip('Attention 24h: '+at['24h'],'');
   if(chips)h+='<div class="r-chips">'+chips+'</div>';
-  h+='<div class="r-grid">';
+
+  if(tiles)h+='<div class="r-tiles">'+tiles+'</div>';
+  if(st.pending>0)h+='<p class="r-note">Loading market data and sell cost...</p>';
+
+  var unk=(dc.unknowns||[]).filter(function(u){return !(sellHtml&&/Exit cost not checked/i.test(String(u)))});
+  h+='<div class="r-h">Signals</div><div class="r-grid">';
   h+=group('Blockers','\u2716','bad',dc.blockers);
   h+=group('Cautions','\u26A0','warn',dc.cautions);
   h+=group('Positives','\u2714','ok',dc.positives);
-  h+=group('Unknowns','?','mut',dc.unknowns);
+  h+=group('Unknowns','?','mut',unk);
   h+=group('Pre-rug patterns','\u26A0','warn',d.pre_rug);
   h+=group('What would change this','\u21BB','mut',d.would_change_my_mind);
-  h+=debate(d.debate);
   h+='</div>';
-  h+='<div class="r-tools"><button type="button" class="btn btn-o" id="cj">Copy JSON</button><button type="button" class="btn btn-o" id="cl">Copy link</button><a class="btn btn-o" href="/omni?mint='+encodeURIComponent(d.mint||'')+'" target="_blank" rel="noopener">Open JSON</a></div>';
-  h+='<details class="r-raw"><summary>Raw JSON</summary><pre>'+esc(lastJSON)+'</pre></details>';
-  h+='<p class="muted" style="margin-top:.6rem;font-size:.78rem">v'+esc(d.version||'')+' · Heuristics only, not financial advice.</p></div>';
+  h+=flagHtml+sellHtml;
+  if(d.debate)h+='<div class="r-h">Agent debate</div><div class="r-grid">'+debate(d.debate)+'</div>';
+
+  var steps=[];
+  if((dc.blockers||[]).length)steps.push('Blockers were found. Understand each one before sizing any trade.');
+  if(!sellHtml&&st.pending<=0)steps.push('Run the exit check (GET /exit or MCP check_exit) before sizing a trade.');
+  steps.push('Verify on-chain (DexScreener, Solscan) before acting.');
+  h+='<div class="r-h">Next steps</div><ul class="r-next">'+steps.map(function(z){return '<li>'+esc(z)+'</li>'}).join('')+'</ul>';
+
+  var raw=JSON.stringify({omni:st.d,signal:st.s,exit:st.x},null,2);
+  var wasOpen=$('details.r-raw')&&$('details.r-raw').open;
+  h+='<div class="r-tools"><button type="button" class="btn btn-o" id="cj">Copy JSON</button><button type="button" class="btn btn-o" id="cl">Copy link</button><a class="btn btn-o" href="/omni?mint='+encodeURIComponent(d.mint||st.mint)+'" target="_blank" rel="noopener">Open JSON</a></div>';
+  h+='<details class="r-raw"'+(wasOpen?' open':'')+'><summary>Raw JSON</summary><pre>'+esc(raw)+'</pre></details>';
+  h+='<p class="r-note">v'+esc(d.version||'')+' \u00B7 Heuristics only, not financial advice. Data can be late or wrong.</p></div>';
   out.innerHTML=h;
-  requestAnimationFrame(function(){requestAnimationFrame(function(){var f=$('#fg');if(f)f.style.strokeDashoffset=f.getAttribute('data-off')})});
-  $('#cj').onclick=function(){copy(lastJSON,this)};
-  $('#cl').onclick=function(){copy(location.origin+location.pathname+'?mint='+encodeURIComponent(d.mint||''),this)};
+  if(first)requestAnimationFrame(function(){requestAnimationFrame(function(){var f=$('#fg');if(f)f.style.strokeDashoffset=f.getAttribute('data-off')})});
+  $('#cj').onclick=function(){copy(raw,this)};
+  $('#cl').onclick=function(){copy(location.origin+location.pathname+'?mint='+encodeURIComponent(st.mint),this)};
+  $('#ca').onclick=function(){copy(d.mint||st.mint,this)};
 }
 function showErr(m){out.innerHTML='<div class="r-err">'+esc(m)+'</div>'}
+function extra(url,key,my){
+  fetch(url,{headers:{'Accept':'application/json'}}).then(function(r){return r.ok?r.json():null}).catch(function(){return null}).then(function(j){
+    if(my!==token||!st)return;st[key]=j;st.pending--;render(false);
+  });
+}
 async function run(m){
   m=(m||'').trim();
   if(!B58.test(m)){showErr('That does not look like a Solana mint address. Paste the full CA (32-44 characters).');return}
+  var my=++token;st=null;
   btn.disabled=true;btn.textContent='Checking...';
   out.innerHTML='<div class="r-load"><div class="r-spin"></div><span>Checking '+esc(m.slice(0,4))+'...'+esc(m.slice(-4))+' - the first request can take up to 30s if the server is waking up.</span></div>';
   var ctl=new AbortController(),to=setTimeout(function(){ctl.abort()},60000);
   try{
     var r=await fetch('/omni?mint='+encodeURIComponent(m),{signal:ctl.signal,headers:{'Accept':'application/json'}});
     var txt=await r.text();var d=null;try{d=JSON.parse(txt)}catch(e){}
+    if(my!==token)return;
     if(r.status===429){showErr('Too many requests. Wait a few seconds and press Check again.')}
     else if(!r.ok||!d){var det=d&&(d.detail||d.error);showErr('Request failed ('+r.status+'). '+(det?(typeof det==='string'?det:JSON.stringify(det)):'Try again in a moment.'))}
-    else{lastJSON=JSON.stringify(d,null,2);render(d);try{history.replaceState(null,'','?mint='+encodeURIComponent(m))}catch(e){}}
+    else{
+      st={d:d,s:null,x:null,mint:m,pending:2};render(true);
+      try{history.replaceState(null,'','?mint='+encodeURIComponent(m))}catch(e){}
+      extra('/signal?mint='+encodeURIComponent(m),'s',my);
+      extra('/exit?mint='+encodeURIComponent(m),'x',my);
+    }
   }catch(e){showErr(e&&e.name==='AbortError'?'Timed out after 60s. Press Check again.':'Network error. Check your connection and try again.')}
   finally{clearTimeout(to);btn.disabled=false;btn.textContent='Check'}
 }
 $('#f').addEventListener('submit',function(e){e.preventDefault();run(inp.value)});
 inp.addEventListener('paste',function(){setTimeout(function(){var v=inp.value.trim();inp.value=v;if(B58.test(v))run(v)},0)});
-$('#demo').addEventListener('click',function(){inp.value=SOL;run(SOL)});
+$('#paste').addEventListener('click',function(){
+  if(navigator.clipboard&&navigator.clipboard.readText){navigator.clipboard.readText().then(function(t){inp.value=(t||'').trim();run(inp.value)}).catch(function(){inp.focus()})}else inp.focus();
+});
+$('#check').addEventListener('click',function(e){var b=e.target.closest('.r-try');if(b){inp.value=b.getAttribute('data-mint');run(inp.value)}});
 var q=new URLSearchParams(location.search).get('mint');
 if(q){inp.value=q;run(q)}
 })();
@@ -326,8 +463,8 @@ footer a {{ color: var(--a) }}
 <div class="bg" aria-hidden="true"><span></span><span></span><span></span></div>
 <div class="wrap">
   <nav>
-    <div class="logo"><img src="/favicon.png" alt="" onerror="this.remove()">TVibe<em> Signal</em></div>
-    <div>
+    <div class="logo">TVibe<em> Signal</em></div>
+    <div class="navlinks">
       <a href="/agents">Agents</a>
       <a href="/stats">Stats</a>
       <a href="/docs">API</a>
@@ -359,12 +496,23 @@ footer a {{ color: var(--a) }}
       <input id="mint" name="mint" type="text" required spellcheck="false" autocomplete="off"
         autocapitalize="off" autocorrect="off"
         placeholder="So1111… or any token mint" aria-label="Token mint address" />
+      <button id="paste" type="button" class="btn btn-o">Paste</button>
       <button id="go" type="submit" class="btn btn-p">Check</button>
     </form>
-    <p class="muted hint" style="margin-top:.55rem;font-size:.8rem">
-      The result shows right here. Try <button type="button" id="demo">SOL</button> · not financial advice
-    </p>
+    <div class="tryrow">Try
+      <button type="button" class="r-try" data-mint="So11111111111111111111111111111111111111112">SOL</button>
+      <button type="button" class="r-try" data-mint="EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v">USDC</button>
+      <button type="button" class="r-try" data-mint="33jENUQnjoitkMFpvNJcSHyLAHFWJuHwT6E3E8CNpump">Dope</button>
+      <button type="button" class="r-try" data-mint="CbcyNo7m1amFWqEQm2m4PLv1UNvpcL3C1Ujm6AkzpKoU">e/acc</button>
+    </div>
     <div id="out" aria-live="polite"></div>
+  </div>
+
+  <div class="strip">
+    <div><b>Free</b><span>no key needed</span></div>
+    <div><b>Open source</b><span>self-host anytime</span></div>
+    <div><b>Public record</b><span>accuracy on /stats</span></div>
+    <div><b>MCP ready</b><span>Claude, Cursor, agents</span></div>
   </div>
 
   <div class="grid">
@@ -443,7 +591,7 @@ footer a {{ color: var(--a) }}
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def home_v284():
+async def home_v285():
     return HOME_HTML
 
 
@@ -469,4 +617,4 @@ async def support_fair_use():
     return FAIR_USE.strip() + "\n"
 
 
-print(f"[part104] v{VERSION} {BRAND} home + inline mint check + X link -> GET /")
+print(f"[part104] v{VERSION} {BRAND} home + market tiles + sell cost + X link -> GET /")
