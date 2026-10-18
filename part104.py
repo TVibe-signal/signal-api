@@ -267,6 +267,7 @@ function render(first){
   if(t10)tiles+=tile('Top 10 holders',t10[1]+'%',Number(t10[1])<25?'ok':(Number(t10[1])<50?'warn':'bad'));
   if(lp)tiles+=tile('LP locked or burned',lp[1]+'%',Number(lp[1])>=80?'ok':(Number(lp[1])>=50?'warn':'bad'));
   if(mcap!==undefined)tiles+=tile('Market cap',compact(mcap));
+  if(vol1!==undefined)tiles+=tile('Market cap',compact(mcap));
   if(vol1!==undefined)tiles+=tile('Volume 1h',compact(vol1));
   if(isNum(buys)&&isNum(sells))tiles+=tile('Buys / sells 5m',buys+' / '+sells,sells>buys*2?'warn':(buys>sells*2?'ok':''));
   var ow=/One wallet holds (\d+(?:\.\d+)?)%\+? of supply/i.exec(all);
@@ -320,6 +321,8 @@ function render(first){
   if(dcf)chips+=chip('Data confidence: '+dcf,{high:'ok',medium:'warn',low:'warn'}[String(dcf).toLowerCase()]||'');
   if(chips)h+='<div class="r-chips">'+chips+'</div>';
   if(s&&s.source_note)h+='<p class="r-note">\u24D8 '+esc(s.source_note)+'</p>';
+  var at2=d.attestation;
+  if(at2&&at2.sig)h+='<p class="r-note"><span class="num">\u2714 Signed #'+esc(at2.chain_n)+'</span> hash '+esc(String(at2.hash).slice(0,12))+'\u2026 \u00B7 <a href="/attest" target="_blank" rel="noopener">verify</a></p>';
 
   if(tiles)h+='<div class="r-tiles">'+tiles+'</div>';
   if(st.pending>0)h+='<p class="r-note">Loading market data and sell cost...</p>';
@@ -655,6 +658,7 @@ footer a {{ color: var(--a) }}
       <a href="/support">/support</a> ·
       <a href="/agents">/agents</a> ·
       <a href="/llms.txt">llms.txt</a> ·
+      <a href="/attest">/attest</a> ·
       <a href="{GITHUB_URL}" target="_blank" rel="noopener noreferrer">source</a> ·
       <a class="fx" href="{X_URL}" target="_blank" rel="noopener noreferrer"><svg class="ic"><use href="#i-x"/></svg>@realTVibe</a>
     </p>
