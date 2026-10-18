@@ -1,5 +1,5 @@
 # ---------- v2.84: TVibe home - X link, inline mint check (no raw JSON), color-coded result ----------
-VERSION = "2.85.0"
+VERSION = "2.86.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -128,6 +128,45 @@ footer a.fx{display:inline-flex;align-items:center;gap:.3rem}
 details.r-raw{margin-top:.6rem;background:#08101c;border:1px solid var(--line);border-radius:.65rem;padding:.5rem .75rem}
 details.r-raw summary{cursor:pointer;color:var(--muted);font-size:.82rem}
 details.r-raw pre{margin:.5rem 0 0;max-height:300px;overflow:auto;font-size:.75rem}
+
+:root{--muted:#9db0ca;--sans:"Inter",ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;--disp:"Space Grotesk","Inter",ui-sans-serif,system-ui,sans-serif;--mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+body{font-family:var(--sans);font-size:16px;line-height:1.6}
+h1,.logo,.r-big,.r-h,.card h3,section h2,.check h3,.strip b{font-family:var(--disp)}
+code,pre,.r-mint,.sol,.check input{font-family:var(--mono)}
+.sub{font-size:1.08rem;color:#aab9d0}
+.check input{font-size:.9rem}
+.r-hero.ok .r-big{color:#3df5ad}.r-hero.warn .r-big{color:#ffc94d}.r-hero.bad .r-big{color:#ff6b64}
+.r-big{font-size:2.05rem;font-weight:700;line-height:1.1}
+.r-tok{font-size:.95rem;font-family:var(--disp);color:#c4d0e4;background:rgba(255,255,255,.06)}
+.r-vtxt p{font-size:.96rem;line-height:1.55;color:#dbe5f5}
+.r-ring .n{font-family:var(--disp);font-size:1.85rem;font-weight:700}
+.r-ring .n small{font-family:var(--sans);font-size:.66rem;color:#aab9d0}
+.r-h{font-size:1.2rem;font-weight:700;margin:1.5rem 0 .65rem;letter-spacing:-.01em}
+.r-h::before{content:"";width:4px;height:1.1em;border-radius:3px;background:linear-gradient(var(--b),var(--a))}
+.r-h small{font-family:var(--sans)}
+.r-tile{padding:.7rem .85rem}
+.r-tile small{font-size:.8rem;color:#a9b9d0;margin-bottom:.1rem}
+.r-tile b{font-family:var(--disp);font-size:1.5rem;font-weight:700;font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.r-chip{font-size:.84rem;font-weight:600;padding:.28rem .75rem}
+.r-grp,.r-box{padding:.85rem 1rem}
+.r-grp h4,.r-box h3{font-size:1.05rem;font-family:var(--disp);margin-bottom:.65rem}
+.r-grp.ok h4{color:#3df5ad}.r-grp.warn h4{color:#ffc94d}.r-grp.bad h4{color:#ff6b64}.r-grp.mut h4{color:#bdcae0}
+.r-grp li{font-size:.97rem;line-height:1.55;padding:.4rem 0 .4rem .85rem;margin-bottom:.35rem;color:#e8eefa}
+.r-grp.mut li{color:#b0bfd5}
+.num{font-family:var(--mono);font-weight:700;font-size:.9em;padding:.02em .35em;border-radius:.35em;background:rgba(255,255,255,.08);white-space:nowrap;color:#fff}
+.r-grp.ok .num{color:#3df5ad;background:rgba(20,241,149,.12)}
+.r-grp.warn .num{color:#ffc94d;background:rgba(245,183,59,.14)}
+.r-grp.bad .num{color:#ff6b64;background:rgba(242,86,79,.15)}
+.r-vtxt .num{background:rgba(255,255,255,.1)}
+.r-prow b{font-size:.98rem}
+.r-prow p{font-size:.88rem;color:#aab9d0}
+.r-sell{font-size:.95rem}
+.r-sell b{font-family:var(--mono);font-size:.9rem}
+.r-note{font-size:.84rem}
+.r-next{font-size:.95rem;line-height:1.6}
+.r-mint{font-size:.78rem}
+.btn{font-family:var(--sans)}
+@media(max-width:600px){nav{position:static}.r-big{font-size:1.8rem}}
 @media(prefers-reduced-motion:reduce){.res,.r-spin,.r-ring .fg{animation:none!important;transition:none!important}}
 """
 
@@ -142,6 +181,7 @@ function vc(v){return {ok:'ok',caution:'warn',avoid:'bad'}[String(v||'').toLower
 function pct(x){return Math.round((Number(x)||0)*100)}
 function chip(t,c){return '<span class="r-chip '+(c||'')+'">'+esc(t)+'</span>'}
 function isNum(v){return typeof v==='number'&&isFinite(v)}
+function hl(t){return t.replace(/(\$\d{1,3}(?:,\d{3})+(?:\.\d+)?|\$\d+(?:\.\d+)?|\d+(?:\.\d+)?%\+?|\b\d+\+? ?(?:days?|hours?|h)\b)/g,'<span class="num">$1</span>')}
 function tidy(s){return String(s==null?'':s).replace(/\s*\([^()]*\u03b1=\{[^}]*\}\)/,'')}
 function copy(text,el){
   function done(){if(el){var o=el.textContent;el.textContent='Copied';setTimeout(function(){el.textContent=o},1200)}}
@@ -170,7 +210,7 @@ function fmtUsd(n){return '$'+Number(n).toLocaleString('en-US',{maximumFractionD
 function fmtPrice(n){n=Number(n);return '$'+(n>=1?n.toLocaleString('en-US',{maximumFractionDigits:2}):n.toPrecision(4))}
 function group(title,sym,c,arr){
   if(!Array.isArray(arr)||!arr.length)return '';
-  var li=arr.map(function(x){return '<li>'+esc(tidy(typeof x==='string'?x:(x.label||x.id||JSON.stringify(x))))+'</li>'}).join('');
+  var li=arr.map(function(x){return '<li>'+hl(esc(tidy(typeof x==='string'?x:(x.label||x.id||JSON.stringify(x)))))+'</li>'}).join('');
   return '<div class="r-grp '+c+'"><h4><span class="r-sym">'+sym+'</span>'+title+'<b>'+arr.length+'</b></h4><ul>'+li+'</ul></div>';
 }
 function debate(db){
@@ -213,6 +253,13 @@ function render(first){
   if(hq!==undefined)tiles+=tile('Holder quality',Math.round(hq)+' / 100',hq>=60?'ok':(hq>=40?'warn':'bad'));
   if(t10)tiles+=tile('Top 10 holders',t10[1]+'%',Number(t10[1])<25?'ok':(Number(t10[1])<50?'warn':'bad'));
   if(lp)tiles+=tile('LP locked or burned',lp[1]+'%',Number(lp[1])>=80?'ok':(Number(lp[1])>=50?'warn':'bad'));
+  var ow=/One wallet holds (\d+(?:\.\d+)?)%\+? of supply/i.exec(all);
+  if(ow)tiles+=tile('Largest wallet',ow[1]+'%+',Number(ow[1])>=30?'bad':'warn');
+  if(age===undefined){
+    var ao=/Pair older than (\d+) days/i.exec(all),ay=/Pair (?:younger|newer) than (\d+) (days|hours)/i.exec(all);
+    if(ao)tiles+=tile('Pair age',ao[1]+'+ d','ok');
+    else if(ay)tiles+=tile('Pair age','< '+ay[1]+(ay[2]==='hours'?' h':' d'),'bad');
+  }
 
   var flags=s?find(s,/^flags$/i,Array.isArray):undefined;
   var flagHtml='';
@@ -240,7 +287,7 @@ function render(first){
 
   var h='<div class="res">';
   h+='<div class="r-hero '+c+'"><div class="r-ring '+rc+'"><svg viewBox="0 0 88 88" width="88" height="88"><circle class="bg" cx="44" cy="44" r="34"/><circle class="fg" id="fg" cx="44" cy="44" r="34" stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+(first?C.toFixed(1):off.toFixed(1))+'" data-off="'+off.toFixed(1)+'"/></svg><div class="n">'+(hasRisk?risk:'?')+'<small>risk / 100</small></div></div>';
-  h+='<div class="r-vtxt"><div class="r-big"><i class="r-dot"></i>'+esc(label)+'<span class="r-tok">'+esc(d.token||'')+'</span></div><p>'+esc(tidy(d.summary||''))+'</p></div></div>';
+  h+='<div class="r-vtxt"><div class="r-big"><i class="r-dot"></i>'+esc(label)+'<span class="r-tok">'+esc(d.token||'')+'</span></div><p>'+hl(esc(tidy(d.summary||'')))+'</p></div></div>';
   h+='<div class="r-mint">'+esc(d.mint||st.mint)+'</div>';
   h+='<div class="r-links"><button type="button" class="btn btn-o" id="ca">Copy address</button><a class="btn btn-o" href="https://dexscreener.com/solana/'+encodeURIComponent(d.mint||st.mint)+'" target="_blank" rel="noopener noreferrer">DexScreener</a><a class="btn btn-o" href="https://solscan.io/token/'+encodeURIComponent(d.mint||st.mint)+'" target="_blank" rel="noopener noreferrer">Solscan</a></div>';
 
@@ -340,6 +387,9 @@ HOME_HTML = f"""<!DOCTYPE html>
 <meta property="og:image" content="{BASE}/og.svg">
 <link rel="icon" type="image/png" href="/favicon.png">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@500;700&amp;family=Space+Grotesk:wght@600;700&amp;display=swap">
 <style>
 :root {{
   --bg:#070b12; --card:rgba(15,22,34,.92); --line:rgba(40,56,78,.9);
@@ -591,7 +641,7 @@ footer a {{ color: var(--a) }}
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def home_v285():
+async def home_v286():
     return HOME_HTML
 
 
@@ -617,4 +667,5 @@ async def support_fair_use():
     return FAIR_USE.strip() + "\n"
 
 
-print(f"[part104] v{VERSION} {BRAND} home + market tiles + sell cost + X link -> GET /")
+
+print(f"[part104] v{VERSION} {BRAND} home + typography + market tiles + sell cost + X link -> GET /")
