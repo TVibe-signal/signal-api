@@ -5,7 +5,7 @@ app.openapi_schema = None
 
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
-BRAND = "TVibe"
+BRAND = "TVibe Signal"
 DONATE_SOL = "3iAVBvE4aU4A5DTKCqzu6jg79UfW6aEnqUD1pjfew18n"
 BASE = "https://signal-api-24q4.onrender.com"
 DONATE_NOTE = (
