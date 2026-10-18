@@ -108,6 +108,7 @@ _LOADER_PARTS = [
 ("part98.py", 0, "SKIP"),  # upstream counters + limiter
 ("part99.py", 0, "SKIP"),  # evidence-calibrated reasoning
 ("part100.py", 0, "SKIP"),  # shadow outcome wire + fair-use + donate
+("part101.py", 0, "SKIP"),  # donate banner
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
 ]
 
