@@ -1,5 +1,5 @@
 # ---------- v2.84: TVibe home - X link, inline mint check (no raw JSON), color-coded result ----------
-VERSION = "2.86.0"
+VERSION = "2.87.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -166,6 +166,9 @@ code,pre,.r-mint,.sol,.check input{font-family:var(--mono)}
 .r-next{font-size:.95rem;line-height:1.6}
 .r-mint{font-size:.78rem}
 .btn{font-family:var(--sans)}
+.r-tile em{display:block;font-style:normal;font-size:.82rem;font-weight:600;margin-top:.1rem;color:var(--muted)}
+.r-tile em.ok{color:#3df5ad}.r-tile em.bad{color:#ff6b64}
+.r-box .r-sell{margin-top:0}
 @media(max-width:600px){nav{position:static}.r-big{font-size:1.8rem}}
 @media(prefers-reduced-motion:reduce){.res,.r-spin,.r-ring .fg{animation:none!important;transition:none!important}}
 """
@@ -181,6 +184,11 @@ function vc(v){return {ok:'ok',caution:'warn',avoid:'bad'}[String(v||'').toLower
 function pct(x){return Math.round((Number(x)||0)*100)}
 function chip(t,c){return '<span class="r-chip '+(c||'')+'">'+esc(t)+'</span>'}
 function isNum(v){return typeof v==='number'&&isFinite(v)}
+function isNumLike(v){return isNum(v)||(typeof v==='string'&&v.trim()!==''&&isFinite(Number(v)))}
+function compact(n){n=Number(n);var a=Math.abs(n);if(a>=1e9)return '$'+(n/1e9).toFixed(2)+'B';if(a>=1e6)return '$'+(n/1e6).toFixed(2)+'M';if(a>=1e3)return '$'+(n/1e3).toFixed(1)+'K';return '$'+n.toFixed(0)}
+function nice(f){f=String(f||'').replace(/_/g,' ').trim();return f.charAt(0).toUpperCase()+f.slice(1)}
+function flagCls(f){f=String(f).toLowerCase();return /dump|sell|rug|drain|honeypot|bundle|sniper/.test(f)?'bad':(/buy|accum/.test(f)?'':'warn')}
+function fmtAge(d){if(d<1/24)return Math.max(1,Math.round(d*1440))+' min';if(d<1)return Math.round(d*24)+' h';if(d>=730)return (d/365).toFixed(1)+' yr';return (d<30?Math.round(d*10)/10:Math.round(d))+' d'}
 function hl(t){return t.replace(/(\$\d{1,3}(?:,\d{3})+(?:\.\d+)?|\$\d+(?:\.\d+)?|\d+(?:\.\d+)?%\+?|\b\d+\+? ?(?:days?|hours?|h)\b)/g,'<span class="num">$1</span>')}
 function tidy(s){return String(s==null?'':s).replace(/\s*\([^()]*\u03b1=\{[^}]*\}\)/,'')}
 function copy(text,el){
@@ -224,7 +232,7 @@ function debate(db){
   var ag=db.agreement_weighted!=null?db.agreement_weighted:db.agreement;
   return '<section class="r-box r-full" style="margin:0"><h3>Agent debate '+chip(db.meta_verdict,vc(db.meta_verdict))+'<span style="margin-left:auto;font-weight:500;font-size:.75rem;color:var(--muted)">agreement '+pct(ag)+'%</span></h3><div class="r-vbar">'+bar+'</div>'+rows+'</section>';
 }
-function tile(label,val,c){return '<div class="r-tile '+(c||'')+'"><small>'+esc(label)+'</small><b>'+esc(val)+'</b></div>'}
+function tile(label,val,c,sub,sc){return '<div class="r-tile '+(c||'')+'"><small>'+esc(label)+'</small><b>'+esc(val)+'</b>'+(sub?'<em class="'+(sc||'')+'">'+esc(sub)+'</em>':'')+'</div>'}
 
 function render(first){
   var d=st.d,s=st.s,x=st.x,dc=d.decision||{};
@@ -239,8 +247,13 @@ function render(first){
 
   var liq=pick(/^(liquidity(_usd)?|liq_usd)$/i,isNum);
   if(liq===undefined){var m1=/Liquidity \$([\d,]+)/.exec(d.summary||'');if(m1)liq=Number(m1[1].replace(/,/g,''))}
-  var price=pick(/^(price(_usd)?|priceusd)$/i,isNum);
+  var price=pick(/^(price(_usd)?|priceusd)$/i,isNumLike);
   var age=pick(/^(pair_age_days|age_days|pair_age_d|pair_age)$/i,isNum);
+  var ageMin=pick(/^pair_age_minutes$/i,isNum);
+  if(age===undefined&&ageMin!==undefined)age=ageMin/1440;
+  var pc=s&&s.price_change_pct&&typeof s.price_change_pct==='object'?s.price_change_pct['24h']:undefined;
+  var mcap=pick(/^market_cap_usd$/i,isNumLike),vol1=pick(/^volume_1h$/i,isNumLike);
+  var buys=s?s.buys_5m:undefined,sells=s?s.sells_5m:undefined;
   var hq=pick(/^holder_quality(_score)?$/i,function(q){return isNum(q)||(q&&isNum(q.score))});
   if(hq&&typeof hq==='object')hq=hq.score;
   var t10=/Top 10 holders own (?:only )?(\d+(?:\.\d+)?)%/i.exec(all);
@@ -248,11 +261,14 @@ function render(first){
 
   var tiles='';
   if(liq!==undefined)tiles+=tile('Liquidity',fmtUsd(liq),liq>=100000?'ok':(liq>=20000?'warn':'bad'));
-  if(price!==undefined)tiles+=tile('Price',fmtPrice(price));
-  if(age!==undefined)tiles+=tile('Pair age',age<1?Math.max(1,Math.round(age*24))+' h':(Math.round(age*10)/10)+' d',age<1?'bad':(age<7?'warn':'ok'));
+  if(price!==undefined)tiles+=tile('Price',fmtPrice(price),'',isNum(pc)?'24h '+(pc>=0?'+':'')+pc+'%':'',isNum(pc)?(pc>=0?'ok':'bad'):'');
+  if(age!==undefined)tiles+=tile('Pair age',fmtAge(age),age<1?'bad':(age<7?'warn':'ok'));
   if(hq!==undefined)tiles+=tile('Holder quality',Math.round(hq)+' / 100',hq>=60?'ok':(hq>=40?'warn':'bad'));
   if(t10)tiles+=tile('Top 10 holders',t10[1]+'%',Number(t10[1])<25?'ok':(Number(t10[1])<50?'warn':'bad'));
   if(lp)tiles+=tile('LP locked or burned',lp[1]+'%',Number(lp[1])>=80?'ok':(Number(lp[1])>=50?'warn':'bad'));
+  if(mcap!==undefined)tiles+=tile('Market cap',compact(mcap));
+  if(vol1!==undefined)tiles+=tile('Volume 1h',compact(vol1));
+  if(isNum(buys)&&isNum(sells))tiles+=tile('Buys / sells 5m',buys+' / '+sells,sells>buys*2?'warn':(buys>sells*2?'ok':''));
   var ow=/One wallet holds (\d+(?:\.\d+)?)%\+? of supply/i.exec(all);
   if(ow)tiles+=tile('Largest wallet',ow[1]+'%+',Number(ow[1])>=30?'bad':'warn');
   if(age===undefined){
@@ -263,7 +279,7 @@ function render(first){
 
   var flags=s?find(s,/^flags$/i,Array.isArray):undefined;
   var flagHtml='';
-  if(flags&&flags.length)flagHtml='<div class="r-h">Flags</div><div class="r-chips" style="margin-top:0">'+flags.map(function(f){return chip(typeof f==='string'?f:(f.label||f.id||f.name||''),'warn')}).join('')+'</div>';
+  if(flags&&flags.length)flagHtml='<div class="r-h">Flags</div><div class="r-chips" style="margin-top:0">'+flags.map(function(f){var t=typeof f==='string'?f:(f.label||f.id||f.name||'');return chip(nice(t),flagCls(t))}).join('')+'</div>';
 
   var sellHtml='';
   if(x){
@@ -300,10 +316,18 @@ function render(first){
   if(cf&&cf.available&&cf.expected_bad_rate!=null){var r=cf.expected_bad_rate;chips+=chip('Similar cases bad: '+pct(r)+'% (n='+cf.cohort_n+')',r<.25?'ok':(r<.5?'warn':'bad'))}
   var at=d.community&&d.community.attention;
   if(at&&at['24h']!=null)chips+=chip('Attention 24h: '+at['24h'],'');
+  var dcf=s&&s.decision_confidence&&s.decision_confidence.level;
+  if(dcf)chips+=chip('Data confidence: '+dcf,{high:'ok',medium:'warn',low:'warn'}[String(dcf).toLowerCase()]||'');
   if(chips)h+='<div class="r-chips">'+chips+'</div>';
+  if(s&&s.source_note)h+='<p class="r-note">\u24D8 '+esc(s.source_note)+'</p>';
 
   if(tiles)h+='<div class="r-tiles">'+tiles+'</div>';
   if(st.pending>0)h+='<p class="r-note">Loading market data and sell cost...</p>';
+  var tr=s&&s.track_record_context;
+  if(tr&&isNum(tr.bad_outcome_rate)){
+    var br=tr.bad_outcome_rate*100,bc=br<25?'ok':(br<50?'warn':'bad');
+    h+='<div class="r-h">Track record <small>similar past verdicts</small></div><div class="r-box"><div class="r-sell"><span>Ended badly'+(tr.horizon_hours?' ('+tr.horizon_hours+'h)':'')+'</span><div class="r-bar"><i class="'+bc+'" style="width:'+Math.min(100,Math.max(3,br))+'%"></i></div><b class="'+bc+'">'+(Math.round(br*10)/10)+'%</b></div><p class="r-note">'+(tr.n?'Based on '+tr.n+' judged tokens'+(tr.basis?' ('+esc(String(tr.basis).replace(/^judged tokens with /i,''))+')':'')+'. ':'')+(tr.ci95&&tr.ci95.length===2?'95% range '+tr.ci95[0]+' to '+tr.ci95[1]+'%. ':'')+esc(tr.meaning||'')+'</p></div>';
+  }
 
   var unk=(dc.unknowns||[]).filter(function(u){return !(sellHtml&&/Exit cost not checked/i.test(String(u)))});
   h+='<div class="r-h">Signals</div><div class="r-grid">';
@@ -319,7 +343,9 @@ function render(first){
 
   var steps=[];
   if((dc.blockers||[]).length)steps.push('Blockers were found. Understand each one before sizing any trade.');
-  if(!sellHtml&&st.pending<=0)steps.push('Run the exit check (GET /exit or MCP check_exit) before sizing a trade.');
+  var sn=(s&&Array.isArray(s.suggested_next))?s.suggested_next:(Array.isArray(dc.next_checks)?dc.next_checks:[]);
+  sn.forEach(function(z){if(typeof z==='string'&&!(sellHtml&&/exit check/i.test(z)))steps.push(z.charAt(0).toUpperCase()+z.slice(1).replace(/\.$/,'')+'.')});
+  if(!sellHtml&&st.pending<=0&&!sn.length)steps.push('Run the exit check (GET /exit or MCP check_exit) before sizing a trade.');
   steps.push('Verify on-chain (DexScreener, Solscan) before acting.');
   h+='<div class="r-h">Next steps</div><ul class="r-next">'+steps.map(function(z){return '<li>'+esc(z)+'</li>'}).join('')+'</ul>';
 
@@ -641,7 +667,7 @@ footer a {{ color: var(--a) }}
 
 
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def home_v286():
+async def home_v287():
     return HOME_HTML
 
 
@@ -667,5 +693,4 @@ async def support_fair_use():
     return FAIR_USE.strip() + "\n"
 
 
-
-print(f"[part104] v{VERSION} {BRAND} home + typography + market tiles + sell cost + X link -> GET /")
+print(f"[part104] v{VERSION} {BRAND} home + market data from /signal + track record + typography + market tiles + sell cost + X link -> GET /")
