@@ -319,4 +319,154 @@ footer a {{ color: var(--a) }}
 </style>
 </head>
 <body>
-<svg width="0" height="0" style="position:absolute" ar
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<symbol id="i-x" viewBox="0 0 24 24"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></symbol>
+<symbol id="i-gh" viewBox="0 0 16 16"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol>
+</svg>
+<div class="bg" aria-hidden="true"><span></span><span></span><span></span></div>
+<div class="wrap">
+  <nav>
+    <div class="logo"><img src="/favicon.png" alt="" onerror="this.remove()">TVibe<em> Signal</em></div>
+    <div>
+      <a href="/agents">Agents</a>
+      <a href="/stats">Stats</a>
+      <a href="/docs">API</a>
+      <a href="#donate">Donate</a>
+      <a class="pill" href="{GITHUB_URL}" target="_blank" rel="noopener noreferrer"><svg class="ic"><use href="#i-gh"/></svg>GitHub</a>
+      <a class="pill" href="{X_URL}" target="_blank" rel="noopener noreferrer"><svg class="ic"><use href="#i-x"/></svg>X</a>
+    </div>
+  </nav>
+
+  <header class="hero">
+    <div class="badge">Free · Open source · Measured in public</div>
+    <h1>Solana token signals<br>for <span>AI agents</span></h1>
+    <p class="sub">
+      One request → verdict, reasons, and context.
+      Track record is public on <a href="/stats">/stats</a>.
+      Heuristics only — not financial advice.
+    </p>
+    <div class="cta">
+      <a class="btn btn-g" href="/stats">Live accuracy</a>
+      <a class="btn btn-o" href="/mcp">MCP</a>
+      <a class="btn btn-o" href="/agents">For agents</a>
+    </div>
+  </header>
+
+  <div class="check" id="check">
+    <h3>Check a token</h3>
+    <p class="muted" style="font-size:.88rem">Paste a Solana mint address (CA)</p>
+    <form id="f" action="/omni" method="get">
+      <input id="mint" name="mint" type="text" required spellcheck="false" autocomplete="off"
+        autocapitalize="off" autocorrect="off"
+        placeholder="So1111… or any token mint" aria-label="Token mint address" />
+      <button id="go" type="submit" class="btn btn-p">Check</button>
+    </form>
+    <p class="muted hint" style="margin-top:.55rem;font-size:.8rem">
+      The result shows right here. Try <button type="button" id="demo">SOL</button> · not financial advice
+    </p>
+    <div id="out" aria-live="polite"></div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3>Primary call</h3>
+      <p><code>GET /omni?mint=…</code></p>
+      <p>Verdict + decision block agents should trust first.</p>
+    </div>
+    <div class="card">
+      <h3>Prove it</h3>
+      <p><code>GET /stats</code></p>
+      <p>Precision / recall on judged outcomes — not marketing claims.</p>
+    </div>
+    <div class="card">
+      <h3>MCP</h3>
+      <p><code>omni(mint)</code></p>
+      <p>Wire into Cursor, Claude, or your agent runtime.</p>
+    </div>
+    <div class="card">
+      <h3>Self-host</h3>
+      <p><code>github.com/TVibex402/signal-api</code></p>
+      <p>Same code. Your Redis starts its own track record.</p>
+    </div>
+  </div>
+
+  <section>
+    <h2>Quick start</h2>
+    <pre>curl -s "{BASE}/omni?mint=So11111111111111111111111111111111111111112" | jq .decision</pre>
+    <p class="muted" style="margin-top:.75rem">
+      Batch: <code>/signals?mints=a,b,c&amp;view=compact</code> (max 10). Cache the same mint 15–30s.
+    </p>
+  </section>
+
+  <section>
+    <h2>Fair use</h2>
+    <div class="card">
+      <p class="muted">
+        Public host is <strong style="color:var(--text)">free</strong>.
+        ~30 req/min without a key · batch max 10 · please cache.
+        Heavy traffic → self-host or slow down on HTTP 429.
+        <a href="/support" style="color:var(--a)">/support</a>
+      </p>
+    </div>
+  </section>
+
+  <section id="donate">
+    <h2>Optional tip (never required)</h2>
+    <div class="donate-box">
+      <p class="muted">{DONATE_NOTE}</p>
+      <p class="sol">{DONATE_SOL}</p>
+      <div class="copy-row">
+        <button type="button" class="copy-btn"
+          onclick="navigator.clipboard.writeText('{DONATE_SOL}').then(()=>{{this.textContent='Copied'}}).catch(()=>{{}})">
+          Copy address
+        </button>
+        <a class="btn btn-o" style="padding:.4rem .85rem;font-size:.85rem" href="/donate">/donate JSON</a>
+      </div>
+    </div>
+  </section>
+
+  <footer>
+    <p>Not financial advice. Heuristics for agents and research.</p>
+    <p style="margin-top:.4rem">
+      <a href="/support">/support</a> ·
+      <a href="/agents">/agents</a> ·
+      <a href="/llms.txt">llms.txt</a> ·
+      <a href="{GITHUB_URL}" target="_blank" rel="noopener noreferrer">source</a> ·
+      <a class="fx" href="{X_URL}" target="_blank" rel="noopener noreferrer"><svg class="ic"><use href="#i-x"/></svg>@realTVibe</a>
+    </p>
+  </footer>
+</div>
+<script>{CHECK_JS}</script>
+</body>
+</html>
+"""
+
+
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
+async def home_v284():
+    return HOME_HTML
+
+
+@app.get("/donate", tags=["product"])
+async def donate_json():
+    return {
+        "brand": BRAND,
+        "free": True,
+        "required": False,
+        "asset": "SOL",
+        "address": DONATE_SOL,
+        "note": DONATE_NOTE,
+        "fair_use": "/support",
+        "self_host": GITHUB_URL,
+        "x": X_URL,
+        "disclaimer": "Not financial advice. Donations are voluntary tips for hosting/RPC only.",
+        "version": VERSION,
+    }
+
+
+@app.get("/support", response_class=PlainTextResponse, tags=["product"])
+async def support_fair_use():
+    return FAIR_USE.strip() + "\n"
+
+
+print(f"[part104] v{VERSION} {BRAND} home + inline mint check + X link -> GET /")
