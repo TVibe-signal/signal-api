@@ -2,6 +2,7 @@
 # Every new /omni verdict gets an Ed25519 signature and is chained by hash to the previous one.
 # Once a day the head of the chain is written to Solana as a memo from the same address,
 # so anyone can check that a verdict existed before its outcome was known.
+# v2.88.1: also keeps decision.verdict consistent with a capped verdict (see _normalize).
 # Needs: `cryptography` in requirements.txt, Upstash Redis env vars (or ATTEST_SECRET).
 # Loader line (after part104, before part7):  ("part105.py", 0, "SKIP"),
 import asyncio
@@ -19,6 +20,7 @@ app.version = VERSION
 app.openapi_schema = None
 
 _ATT_ON = os.environ.get("ATTEST", "1") != "0"
+_NORM_ON = os.environ.get("NORMALIZE_VERDICT", "1") != "0"
 _ATT_DEDUP_S = int(os.environ.get("ATTEST_DEDUP_S", "600"))
 _MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
 _B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
@@ -270,22 +272,55 @@ async def _maybe_anchor():
         S.anchoring = False
 
 
-# ---------------------------------------------------------------- middleware: sign /omni
-async def _inject(start, body):
+# ---------------------------------------------------------------- keep decision.verdict consistent
+# Some responses say "Verdict capped from ok to caution" (and /signal has a capped top-level
+# "verdict") while decision.verdict still says "ok". Agents read decision.verdict first, so we
+# make it match. Only ever downgrades (more cautious); never upgrades.
+_CAP_RE = re.compile(r"Verdict capped from (ok|caution|avoid) to (ok|caution|avoid)", re.I)
+_RANK = {"ok": 0, "caution": 1, "avoid": 2}
+
+
+def _normalize(d):
+    dec = d.get("decision")
+    if not isinstance(dec, dict):
+        return False
+    cur, top = dec.get("verdict"), d.get("verdict")
+    target = None
+    if d.get("verdict_capped_by") and top in _RANK and top != cur:
+        target = top
+    if target is None:
+        m = _CAP_RE.search(str(d.get("summary") or ""))
+        if m:
+            target = m.group(2).lower()
+    if target in _RANK and cur in _RANK and _RANK[target] > _RANK[cur]:
+        dec["verdict_raw"] = cur
+        dec["verdict"] = target
+        if d.get("verdict_capped_by"):
+            dec["capped_by"] = d["verdict_capped_by"]
+        return True
+    return False
+
+
+# ---------------------------------------------------------------- middleware: normalize + sign /omni
+async def _inject(start, body, path="/omni"):
     if start.get("status") != 200:
         return body
     hs = {k.lower(): v for k, v in start["headers"]}
     if b"content-encoding" in hs or b"json" not in hs.get(b"content-type", b""):
         return body
-    await _load()
-    if not S.ok:
-        return body
     d = json.loads(body)
-    if not isinstance(d, dict) or "attestation" in d:
+    if not isinstance(d, dict):
         return body
-    att = await _attest(d)
-    if att:
-        d["attestation"] = att
+    changed = _normalize(d) if _NORM_ON else False
+    if path == "/omni" and _ATT_ON and "attestation" not in d:
+        await _load()
+        if S.ok:
+            att = await _attest(d)
+            if att:
+                d["attestation"] = att
+                changed = True
+    if not changed:
+        return body
     return json.dumps(d, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
@@ -294,7 +329,8 @@ class _AttestMW:
         self.app = app
 
     async def __call__(self, scope, receive, send):
-        if not _ATT_ON or scope["type"] != "http" or scope.get("path") != "/omni" or scope.get("method") != "GET":
+        path = scope.get("path") if scope["type"] == "http" else None
+        if not (_ATT_ON or _NORM_ON) or path not in ("/omni", "/signal") or scope.get("method") != "GET":
             return await self.app(scope, receive, send)
         held, chunks = {}, []
 
@@ -309,7 +345,7 @@ class _AttestMW:
                 return
             body, start = b"".join(chunks), held["start"]
             try:
-                body = await _inject(start, body)
+                body = await _inject(start, body, path)
             except Exception as e:
                 S.last_err = "inject: " + _err(e)
             hdrs = [(k, v) for k, v in start["headers"] if k.lower() != b"content-length"]
