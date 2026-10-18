@@ -1,4 +1,4 @@
-# part106.py - "Cost to sell" block as a standalone add-on (v2.88.1)
+# part106.py - "Cost to sell" block as a standalone add-on (v2.88.2)
 # Works on top of any part104 that serves the home page from the global HOME_HTML.
 # It injects its own style + script; it does not need part104 to be changed.
 # Loader line (after part104/part105, before part7):  ("part106.py", 0, "SKIP"),
@@ -43,7 +43,8 @@ function levels(lv){
     var ks=Object.keys(it);
     var sk=ks.filter(function(k){return /usd|size|amount|notional/i.test(k)&&isNum(it[k])})[0];
     var lk=ks.filter(function(k){return /loss/i.test(k)&&isNum(it[k])})[0]||ks.filter(function(k){return /impact|slip|cost/i.test(k)&&isNum(it[k])})[0];
-    return {size:sk?it[sk]:null,loss:lk?it[lk]:null,lk:lk,status:it.status};
+    var rk=ks.filter(function(k){return /receive|returns|out_usd/i.test(k)&&isNum(it[k])})[0];
+    return {size:sk?it[sk]:null,loss:lk?it[lk]:null,lk:lk,status:it.status,recv:rk?it[rk]:null};
   });
 }
 function vcls(v){v=String(v||'').toLowerCase();return v==='ok'?'ok':(v==='caution'?'warn':(v==='avoid'?'bad':''))}
@@ -64,7 +65,7 @@ function build(x){
   h+='<div class="cs-chips">'+(grade?'<span class="cs-chip '+gc+'">Exit grade: '+esc(grade)+'</span>':'')+(overall?'<span class="cs-chip '+vcls(overall)+'">Overall: '+esc(overall)+'</span>':'')+'</div>';
   if(lv.length){
     h+='<div class="cs-grid">'+lv.slice(0,6).map(function(z){
-      var lab='<span>Sell '+(z.size!=null?usd(z.size):'')+'</span>';
+      var lab='<span>Sell '+(z.size!=null?usd(z.size):'')+(isNum(z.recv)?' <small style="color:#9db0ca">\u2192 '+usd(z.recv)+'</small>':'')+'</span>';
       if(!isNum(z.loss))return lab+'<span class="cs-na">n/a'+(z.status?' ('+esc(z.status)+')':'')+'</span>';
       var l=lossPct(z.loss,z.lk),c=l<3?'ok':(l<8?'warn':'bad');
       return lab+'<div class="cs-bar"><i class="'+c+'" style="width:'+Math.min(100,Math.max(3,l*4))+'%"></i></div><b class="'+c+'">'+(Math.round(l*10)/10)+'% lost</b>';
