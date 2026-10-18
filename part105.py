@@ -176,11 +176,12 @@ async def _attest(d):
             S.day_n = 0
         S.day = day
         prev = S.head
-        h = hashlib.sha256((prev + _canon(rec)).encode()).hexdigest()
+        canon = _canon(rec)
+        h = hashlib.sha256((prev + canon).encode()).hexdigest()
         sig = S.sign(bytes.fromhex(h)).hex()
         S.head, S.n, S.day_n = h, S.n + 1, S.day_n + 1
-        S.buf.append(["RPUSH", "tv:attest:day:" + day, _canon({"rec": rec, "prev": prev, "h": h, "sig": sig})])
-        att = {"record": rec, "prev": prev, "hash": h, "sig": sig, "pubkey": S.pubs, "chain_n": S.n}
+        S.buf.append(["RPUSH", "tv:attest:day:" + day, _canon({"rec": rec, "c": canon, "prev": prev, "h": h, "sig": sig})])
+        att = {"record": rec, "canon": canon, "prev": prev, "hash": h, "sig": sig, "pubkey": S.pubs, "chain_n": S.n}
     if len(S.cache) > 5000:
         S.cache.clear()
     S.cache[mint] = ((verdict, risk), att, now)
@@ -327,7 +328,7 @@ except Exception as _e:
 
 # ---------------------------------------------------------------- public routes
 _HOW = [
-    "1. hash = sha256(prev + canonical_json(record)); canonical_json = json.dumps(record, sort_keys=True, separators=(',', ':')).",
+    "1. hash = sha256(prev + canon) where canon is the exact string in the 'canon' field (the record as JSON with sorted keys, no spaces).",
     "2. Check the Ed25519 signature over bytes.fromhex(hash) with the pubkey (a Solana address, base58).",
     "3. The head hash at the end of each UTC day is written on Solana as a memo 'tvibe1|date|count|head' from the same address.",
     "Genesis prev = sha256(b'tvibe-attest-v1').hexdigest(). Records of one day: GET /attest/day?date=YYYY-MM-DD.",
