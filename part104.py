@@ -1,5 +1,5 @@
-# ---------- v2.83: TVibe home — agent-first, check mint, donate, fair-use ----------
-VERSION = "2.83.0"
+# ---------- v2.84: TVibe home - X link, inline mint check (no raw JSON), color-coded result ----------
+VERSION = "2.84.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -8,21 +8,186 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 BRAND = "TVibe Signal"
 DONATE_SOL = "3iAVBvE4aU4A5DTKCqzu6jg79UfW6aEnqUD1pjfew18n"
 BASE = "https://signal-api-24q4.onrender.com"
+GITHUB_URL = "https://github.com/TVibex402/signal-api"
+X_URL = "https://x.com/realTVibe"
 DONATE_NOTE = (
     f"{BRAND} is free and open source. If the public instance helps your agents, "
     "you can tip SOL to cover hosting & RPC. Never required."
 )
-FAIR_USE = f"""{BRAND} public instance — FREE, fair use
-• About 30 requests/minute without a key (429 if exceeded)
-• /signals batch: max 10 mints per call
-• Cache the same mint 15–30s on the client
-• Prefer GET /omni once over polling many small routes
-• Heavy use: self-host from GitHub (your track-record starts empty)
-• Not financial advice. Heuristics only.
+FAIR_USE = f"""{BRAND} public instance - FREE, fair use
+- About 30 requests/minute without a key (429 if exceeded)
+- /signals batch: max 10 mints per call
+- Cache the same mint 15-30s on the client
+- Prefer GET /omni once over polling many small routes
+- Heavy use: self-host from GitHub (your track-record starts empty)
+- Not financial advice. Heuristics only.
 
 Optional SOL tip (never required):
   {DONATE_SOL}
 """
+
+# Plain (non f-string) blocks: no need to double the braces here.
+CHECK_CSS = r"""
+nav .pill{display:inline-flex;align-items:center;gap:.4rem;border:1px solid var(--line);background:rgba(15,22,34,.7);color:var(--text);padding:.3rem .7rem;border-radius:.65rem;margin-left:.6rem}
+nav .pill:hover{border-color:var(--a)}
+.ic{width:15px;height:15px;fill:currentColor;flex:none}
+.logo{display:flex;align-items:center;gap:.5rem}
+.logo img{width:26px;height:26px;border-radius:7px}
+footer a.fx{display:inline-flex;align-items:center;gap:.3rem}
+.hint button{background:none;border:0;color:var(--a);cursor:pointer;font:inherit;padding:0}
+.check form button:disabled{opacity:.6;cursor:wait}
+#out{margin-top:1rem;text-align:left}
+.r-load{display:flex;align-items:center;gap:.6rem;color:var(--muted);font-size:.88rem;padding:.6rem .2rem}
+.r-spin{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--a);border-radius:50%;animation:rsp .8s linear infinite;flex:none}
+@keyframes rsp{to{transform:rotate(360deg)}}
+.r-err{border:1px solid #6e2523;background:rgba(46,17,18,.8);color:#ffb4b0;border-radius:.75rem;padding:.7rem .9rem;font-size:.88rem}
+.res{animation:rin .35s ease both}
+@keyframes rin{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.r-hero{display:flex;gap:1rem;align-items:center;border-radius:.9rem;padding:1rem;border:1px solid var(--line);background:rgba(17,27,43,.9)}
+.r-hero.ok{border-color:rgba(20,241,149,.45);background:linear-gradient(135deg,rgba(20,241,149,.13),rgba(15,22,34,.9))}
+.r-hero.warn{border-color:rgba(245,183,59,.5);background:linear-gradient(135deg,rgba(245,183,59,.14),rgba(15,22,34,.9))}
+.r-hero.bad{border-color:rgba(242,86,79,.55);background:linear-gradient(135deg,rgba(242,86,79,.15),rgba(15,22,34,.9))}
+.r-ring{position:relative;width:84px;height:84px;flex:none}
+.r-ring svg{width:84px;height:84px;transform:rotate(-90deg)}
+.r-ring circle{fill:none;stroke-width:8;stroke-linecap:round}
+.r-ring .bg{stroke:rgba(255,255,255,.09)}
+.r-ring .fg{transition:stroke-dashoffset .9s cubic-bezier(.2,.8,.2,1)}
+.r-ring.ok .fg{stroke:#14f195}.r-ring.warn .fg{stroke:#f5b73b}.r-ring.bad .fg{stroke:#f2564f}
+.r-ring span{position:absolute;inset:0;display:grid;place-items:center;font-weight:800;font-size:1.35rem;align-content:center}
+.r-ring small{display:block;font-size:.62rem;color:var(--muted);font-weight:500;text-align:center;margin-top:-2px}
+.r-vtxt{min-width:0}
+.r-big{font-size:1.6rem;font-weight:800;letter-spacing:-.02em;display:flex;align-items:center;gap:.55rem;flex-wrap:wrap}
+.r-tok{font-size:.88rem;color:var(--muted);font-weight:500}
+.r-vtxt p{margin:.3rem 0 0;color:#c9d4e6;font-size:.88rem}
+.r-dot{width:12px;height:12px;border-radius:50%;display:inline-block}
+.ok .r-dot{background:#14f195;box-shadow:0 0 12px #14f195}
+.warn .r-dot{background:#f5b73b;box-shadow:0 0 12px #f5b73b}
+.bad .r-dot{background:#f2564f;box-shadow:0 0 12px #f2564f}
+.r-mint{margin:.6rem .1rem 0;font-size:.75rem;color:var(--muted);word-break:break-all;font-family:ui-monospace,monospace}
+.r-chips{display:flex;flex-wrap:wrap;gap:.45rem;margin:.75rem 0 .2rem}
+.r-chip{display:inline-flex;align-items:center;gap:.35rem;border-radius:999px;padding:.2rem .65rem;font-size:.78rem;border:1px solid var(--line);background:rgba(10,18,32,.8);color:var(--muted)}
+.r-chip.ok{color:#14f195;border-color:rgba(20,241,149,.4);background:rgba(11,32,22,.8)}
+.r-chip.warn{color:#f5b73b;border-color:rgba(245,183,59,.45);background:rgba(34,26,9,.8)}
+.r-chip.bad{color:#f2564f;border-color:rgba(242,86,79,.5);background:rgba(36,14,15,.8)}
+.r-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem;margin-top:.6rem}
+@media(max-width:640px){.r-grid{grid-template-columns:1fr}.r-hero{flex-direction:column;align-items:flex-start}}
+.r-grp,.r-box{background:rgba(17,27,43,.9);border:1px solid var(--line);border-radius:.8rem;padding:.7rem .85rem}
+.r-grp h4,.r-box h3{margin:0 0 .5rem;font-size:.88rem;display:flex;align-items:center;gap:.5rem}
+.r-grp h4 b{margin-left:auto;font-size:.75rem;color:var(--muted);font-weight:600}
+.r-sym{width:20px;height:20px;border-radius:6px;display:grid;place-items:center;font-size:.75rem;font-weight:800}
+.r-grp ul{list-style:none;margin:0;padding:0}
+.r-grp li{font-size:.83rem;padding:.3rem 0 .3rem .7rem;border-left:2px solid var(--line);margin-bottom:.25rem;color:#d3ddee}
+.r-grp.ok{border-color:rgba(20,241,149,.35)}.r-grp.ok .r-sym{background:rgba(20,241,149,.15);color:#14f195}.r-grp.ok li{border-left-color:#14f195}
+.r-grp.warn{border-color:rgba(245,183,59,.4)}.r-grp.warn .r-sym{background:rgba(245,183,59,.15);color:#f5b73b}.r-grp.warn li{border-left-color:#f5b73b}
+.r-grp.bad{border-color:rgba(242,86,79,.45)}.r-grp.bad .r-sym{background:rgba(242,86,79,.18);color:#f2564f}.r-grp.bad li{border-left-color:#f2564f}
+.r-grp.mut .r-sym{background:rgba(139,155,180,.15);color:var(--muted)}.r-grp.mut li{border-left-color:#33415c;color:var(--muted)}
+.r-full{grid-column:1/-1}
+.r-vbar{display:flex;height:10px;border-radius:99px;overflow:hidden;background:#0a1220;margin:.2rem 0 .4rem}
+.r-vbar i{display:block;height:100%}
+.r-vbar i.ok{background:#14f195}.r-vbar i.warn{background:#f5b73b}.r-vbar i.bad{background:#f2564f}
+.r-prow{display:flex;gap:.6rem;padding:.5rem 0;border-top:1px solid var(--line)}
+.r-prow .r-chip{align-self:flex-start;min-width:72px;justify-content:center}
+.r-prow p{margin:.15rem 0 0;font-size:.8rem;color:var(--muted)}
+.r-prow small{color:var(--muted)}
+.r-tools{display:flex;gap:.5rem;flex-wrap:wrap;margin-top:.8rem}
+.r-tools .btn{padding:.45rem .85rem;font-size:.82rem}
+details.r-raw{margin-top:.6rem;background:#08101c;border:1px solid var(--line);border-radius:.65rem;padding:.5rem .75rem}
+details.r-raw summary{cursor:pointer;color:var(--muted);font-size:.82rem}
+details.r-raw pre{margin:.5rem 0 0;max-height:300px;overflow:auto;font-size:.75rem}
+@media(prefers-reduced-motion:reduce){.res,.r-spin,.r-ring .fg{animation:none!important;transition:none!important}}
+"""
+
+CHECK_JS = r'''
+(function(){
+var $=function(s){return document.querySelector(s)};
+var out=$('#out'),inp=$('#mint'),btn=$('#go'),lastJSON='';
+var B58=/^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+var SOL='So11111111111111111111111111111111111111112';
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
+function vc(v){return {ok:'ok',caution:'warn',avoid:'bad'}[String(v||'').toLowerCase()]||'mut'}
+function pct(x){return Math.round((Number(x)||0)*100)}
+function chip(t,c){return '<span class="r-chip '+(c||'')+'">'+esc(t)+'</span>'}
+function copy(text,el){
+  function done(){if(el){var o=el.textContent;el.textContent='Copied';setTimeout(function(){el.textContent=o},1200)}}
+  function fb(){var t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();try{document.execCommand('copy')}catch(e){}t.remove();done()}
+  if(navigator.clipboard&&navigator.clipboard.writeText){navigator.clipboard.writeText(text).then(done,fb)}else fb();
+}
+function group(title,sym,c,arr){
+  if(!Array.isArray(arr)||!arr.length)return '';
+  var li=arr.map(function(x){return '<li>'+esc(typeof x==='string'?x:(x.label||x.id||JSON.stringify(x)))+'</li>'}).join('');
+  return '<div class="r-grp '+c+'"><h4><span class="r-sym">'+sym+'</span>'+title+'<b>'+arr.length+'</b></h4><ul>'+li+'</ul></div>';
+}
+function debate(db){
+  if(!db)return '';
+  var vt=db.votes_weighted||db.votes||{};
+  var tot=(vt.ok||0)+(vt.caution||0)+(vt.avoid||0)||1;
+  var bar=['ok','caution','avoid'].map(function(k){return '<i class="'+vc(k)+'" style="width:'+((vt[k]||0)/tot*100)+'%"></i>'}).join('');
+  var rows=(db.personas||[]).map(function(p){
+    return '<div class="r-prow">'+chip(p.verdict,vc(p.verdict))+'<div><b>'+esc(p.persona)+'</b> <small>'+pct(p.confidence)+'%</small><p>'+esc(p.reason)+'</p></div></div>';
+  }).join('');
+  var ag=db.agreement_weighted!=null?db.agreement_weighted:db.agreement;
+  return '<section class="r-box r-full" style="margin:0"><h3>Agent debate '+chip(db.meta_verdict,vc(db.meta_verdict))+'<span style="margin-left:auto;font-weight:500;font-size:.75rem;color:var(--muted)">agreement '+pct(ag)+'%</span></h3><div class="r-vbar">'+bar+'</div>'+rows+'</section>';
+}
+function render(d){
+  var dc=d.decision||{},v=String(dc.verdict||'unknown').toLowerCase(),c=vc(v);
+  var risk=Number(dc.risk_score),hasRisk=isFinite(risk)&&dc.risk_score!=null;
+  var rc=!hasRisk?'mut':(risk<35?'ok':(risk<65?'warn':'bad'));
+  var C=2*Math.PI*34,off=hasRisk?C*(1-Math.min(100,Math.max(0,risk))/100):C;
+  var label={ok:'OK',caution:'Caution',avoid:'Avoid'}[v]||v;
+  var h='<div class="res">';
+  h+='<div class="r-hero '+c+'"><div class="r-ring '+rc+'"><svg viewBox="0 0 84 84"><circle class="bg" cx="42" cy="42" r="34"/><circle class="fg" id="fg" cx="42" cy="42" r="34" stroke-dasharray="'+C.toFixed(1)+'" stroke-dashoffset="'+C.toFixed(1)+'" data-off="'+off.toFixed(1)+'"/></svg><span><div>'+(hasRisk?risk:'?')+'<small>risk</small></div></span></div>';
+  h+='<div class="r-vtxt"><div class="r-big"><i class="r-dot"></i>'+esc(label)+'<span class="r-tok">'+esc(d.token||'')+'</span></div><p>'+esc(d.summary||'')+'</p></div></div>';
+  h+='<div class="r-mint">'+esc(d.mint||'')+'</div>';
+  var chips='';
+  if(d.regime&&d.regime.name)chips+=chip('Regime: '+d.regime.name+' ('+pct(d.regime.confidence)+'%)',/risk_off/.test(d.regime.name)?'warn':(/risk_on/.test(d.regime.name)?'ok':''));
+  if(d.attention_trap)chips+=chip('Attention trap','warn');
+  var t=d.time_to_death;
+  if(t&&t.band)chips+=chip('Stress clock: '+t.band+(t.eta_hours?' (~'+t.eta_hours+'h)':''),{slow:'ok',medium:'warn',fast:'bad'}[String(t.band).toLowerCase()]||'');
+  var cf=d.counterfactual;
+  if(cf&&cf.available&&cf.expected_bad_rate!=null){var r=cf.expected_bad_rate;chips+=chip('Similar cases bad: '+pct(r)+'% (n='+cf.cohort_n+')',r<.25?'ok':(r<.5?'warn':'bad'))}
+  var at=d.community&&d.community.attention;
+  if(at&&at['24h']!=null)chips+=chip('Attention 24h: '+at['24h'],'');
+  if(chips)h+='<div class="r-chips">'+chips+'</div>';
+  h+='<div class="r-grid">';
+  h+=group('Blockers','\u2716','bad',dc.blockers);
+  h+=group('Cautions','\u26A0','warn',dc.cautions);
+  h+=group('Positives','\u2714','ok',dc.positives);
+  h+=group('Unknowns','?','mut',dc.unknowns);
+  h+=group('Pre-rug patterns','\u26A0','warn',d.pre_rug);
+  h+=group('What would change this','\u21BB','mut',d.would_change_my_mind);
+  h+=debate(d.debate);
+  h+='</div>';
+  h+='<div class="r-tools"><button type="button" class="btn btn-o" id="cj">Copy JSON</button><button type="button" class="btn btn-o" id="cl">Copy link</button><a class="btn btn-o" href="/omni?mint='+encodeURIComponent(d.mint||'')+'" target="_blank" rel="noopener">Open JSON</a></div>';
+  h+='<details class="r-raw"><summary>Raw JSON</summary><pre>'+esc(lastJSON)+'</pre></details>';
+  h+='<p class="muted" style="margin-top:.6rem;font-size:.78rem">v'+esc(d.version||'')+' · Heuristics only, not financial advice.</p></div>';
+  out.innerHTML=h;
+  requestAnimationFrame(function(){requestAnimationFrame(function(){var f=$('#fg');if(f)f.style.strokeDashoffset=f.getAttribute('data-off')})});
+  $('#cj').onclick=function(){copy(lastJSON,this)};
+  $('#cl').onclick=function(){copy(location.origin+location.pathname+'?mint='+encodeURIComponent(d.mint||''),this)};
+}
+function showErr(m){out.innerHTML='<div class="r-err">'+esc(m)+'</div>'}
+async function run(m){
+  m=(m||'').trim();
+  if(!B58.test(m)){showErr('That does not look like a Solana mint address. Paste the full CA (32-44 characters).');return}
+  btn.disabled=true;btn.textContent='Checking...';
+  out.innerHTML='<div class="r-load"><div class="r-spin"></div><span>Checking '+esc(m.slice(0,4))+'...'+esc(m.slice(-4))+' - the first request can take up to 30s if the server is waking up.</span></div>';
+  var ctl=new AbortController(),to=setTimeout(function(){ctl.abort()},60000);
+  try{
+    var r=await fetch('/omni?mint='+encodeURIComponent(m),{signal:ctl.signal,headers:{'Accept':'application/json'}});
+    var txt=await r.text();var d=null;try{d=JSON.parse(txt)}catch(e){}
+    if(r.status===429){showErr('Too many requests. Wait a few seconds and press Check again.')}
+    else if(!r.ok||!d){var det=d&&(d.detail||d.error);showErr('Request failed ('+r.status+'). '+(det?(typeof det==='string'?det:JSON.stringify(det)):'Try again in a moment.'))}
+    else{lastJSON=JSON.stringify(d,null,2);render(d);try{history.replaceState(null,'','?mint='+encodeURIComponent(m))}catch(e){}}
+  }catch(e){showErr(e&&e.name==='AbortError'?'Timed out after 60s. Press Check again.':'Network error. Check your connection and try again.')}
+  finally{clearTimeout(to);btn.disabled=false;btn.textContent='Check'}
+}
+$('#f').addEventListener('submit',function(e){e.preventDefault();run(inp.value)});
+inp.addEventListener('paste',function(){setTimeout(function(){var v=inp.value.trim();inp.value=v;if(B58.test(v))run(v)},0)});
+$('#demo').addEventListener('click',function(){inp.value=SOL;run(SOL)});
+var q=new URLSearchParams(location.search).get('mint');
+if(q){inp.value=q;run(q)}
+})();
+'''
 
 HOME_HTML = f"""<!DOCTYPE html>
 <html lang="en">
@@ -150,147 +315,8 @@ footer {{
   color: var(--muted); font-size: .85rem; text-align: center;
 }}
 footer a {{ color: var(--a) }}
+{CHECK_CSS}
 </style>
 </head>
 <body>
-<div class="bg" aria-hidden="true"><span></span><span></span><span></span></div>
-<div class="wrap">
-  <nav>
-    <div class="logo">{BRAND}<em> Signal</em></div>
-    <div>
-      <a href="/agents">Agents</a>
-      <a href="/stats">Stats</a>
-      <a href="/docs">API</a>
-      <a href="#donate">Donate</a>
-      <a href="https://github.com/TVibex402/signal-api">GitHub</a>
-    </div>
-  </nav>
-
-  <header class="hero">
-    <div class="badge">Free · Open source · Measured in public</div>
-    <h1>Solana token signals<br>for <span>AI agents</span></h1>
-    <p class="sub">
-      One request → verdict, reasons, and context.
-      Track record is public on <a href="/stats">/stats</a>.
-      Heuristics only — not financial advice.
-    </p>
-    <div class="cta">
-      <a class="btn btn-g" href="/stats">Live accuracy</a>
-      <a class="btn btn-o" href="/mcp">MCP</a>
-      <a class="btn btn-o" href="/agents">For agents</a>
-    </div>
-  </header>
-
-  <div class="check">
-    <h3>Check a token</h3>
-    <p class="muted" style="font-size:.88rem">Paste a Solana mint address</p>
-    <form action="/omni" method="get">
-      <input name="mint" type="text" required spellcheck="false" autocomplete="off"
-        placeholder="So1111… or any token mint" aria-label="Token mint address" />
-      <button type="submit" class="btn btn-p">Check</button>
-    </form>
-    <p class="muted" style="margin-top:.55rem;font-size:.8rem">
-      Opens <code style="color:var(--a)">/omni?mint=…</code> · JSON · not financial advice
-    </p>
-  </div>
-
-  <div class="grid">
-    <div class="card">
-      <h3>Primary call</h3>
-      <p><code>GET /omni?mint=…</code></p>
-      <p>Verdict + decision block agents should trust first.</p>
-    </div>
-    <div class="card">
-      <h3>Prove it</h3>
-      <p><code>GET /stats</code></p>
-      <p>Precision / recall on judged outcomes — not marketing claims.</p>
-    </div>
-    <div class="card">
-      <h3>MCP</h3>
-      <p><code>omni(mint)</code></p>
-      <p>Wire into Cursor, Claude, or your agent runtime.</p>
-    </div>
-    <div class="card">
-      <h3>Self-host</h3>
-      <p><code>github.com/TVibex402/signal-api</code></p>
-      <p>Same code. Your Redis starts its own track record.</p>
-    </div>
-  </div>
-
-  <section>
-    <h2>Quick start</h2>
-    <pre>curl -s "{BASE}/omni?mint=So11111111111111111111111111111111111111112" | jq .decision</pre>
-    <p class="muted" style="margin-top:.75rem">
-      Batch: <code>/signals?mints=a,b,c&amp;view=compact</code> (max 10). Cache the same mint 15–30s.
-    </p>
-  </section>
-
-  <section>
-    <h2>Fair use</h2>
-    <div class="card">
-      <p class="muted">
-        Public host is <strong style="color:var(--text)">free</strong>.
-        \~30 req/min without a key · batch max 10 · please cache.
-        Heavy traffic → self-host or slow down on HTTP 429.
-        <a href="/support" style="color:var(--a)">/support</a>
-      </p>
-    </div>
-  </section>
-
-  <section id="donate">
-    <h2>Optional tip (never required)</h2>
-    <div class="donate-box">
-      <p class="muted">{DONATE_NOTE}</p>
-      <p class="sol">{DONATE_SOL}</p>
-      <div class="copy-row">
-        <button type="button" class="copy-btn"
-          onclick="navigator.clipboard.writeText('{DONATE_SOL}').then(()=>{{this.textContent='Copied'}}).catch(()=>{{}})">
-          Copy address
-        </button>
-        <a class="btn btn-o" style="padding:.4rem .85rem;font-size:.85rem" href="/donate">/donate JSON</a>
-      </div>
-    </div>
-  </section>
-
-  <footer>
-    <p>Not financial advice. Heuristics for agents and research.</p>
-    <p style="margin-top:.4rem">
-      <a href="/support">/support</a> ·
-      <a href="/agents">/agents</a> ·
-      <a href="/llms.txt">llms.txt</a> ·
-      <a href="https://github.com/TVibex402/signal-api">source</a>
-    </p>
-  </footer>
-</div>
-</body>
-</html>
-"""
-
-
-@app.get("/", response_class=HTMLResponse, include_in_schema=False)
-async def home_v283():
-    return HOME_HTML
-
-
-@app.get("/donate", tags=["product"])
-async def donate_json():
-    return {
-        "brand": BRAND,
-        "free": True,
-        "required": False,
-        "asset": "SOL",
-        "address": DONATE_SOL,
-        "note": DONATE_NOTE,
-        "fair_use": "/support",
-        "self_host": "https://github.com/TVibex402/signal-api",
-        "disclaimer": "Not financial advice. Donations are voluntary tips for hosting/RPC only.",
-        "version": VERSION,
-    }
-
-
-@app.get("/support", response_class=PlainTextResponse, tags=["product"])
-async def support_fair_use():
-    return FAIR_USE.strip() + "\n"
-
-
-print(f"[part104] v{VERSION} {BRAND} home + check mint + donate → GET /")
+<svg width="0" height="0" style="position:absolute" ar
