@@ -61,7 +61,7 @@ S = types.SimpleNamespace(
     loaded=False, ok=False, reason="not loaded yet", persistent=False, next_load=0.0,
     sign=None, pub=b"", pubs="", head=_GENESIS, n=0, day="", day_n=0,
     buf=[], flush_task=None, anchor_task=None, closing={}, anchors={},
-    last_err="", last_try=0.0, anchoring=False, cache={},
+    last_err="", last_try=0.0, anchoring=False, cache={}, last_flush=0,
 )
 _lock = asyncio.Lock()
 
@@ -84,7 +84,11 @@ async def _redis(cmds):
     async with httpx.AsyncClient(timeout=6) as c:
         r = await c.post(cfg[0] + "/pipeline", headers={"Authorization": "Bearer " + cfg[1]}, json=cmds)
         r.raise_for_status()
-        return [x.get("result") for x in r.json()]
+        items = r.json()
+        for x in items:  # Upstash reports a rejected command as {"error": ...} with HTTP 200
+            if isinstance(x, dict) and x.get("error"):
+                raise RuntimeError("redis rejected a command: " + str(x["error"])[:120])
+        return [x.get("result") for x in items]
 
 
 def _pairs(x):
@@ -200,6 +204,9 @@ async def _flush():
         return
     try:
         await _redis(cmds + [["SET", "tv:attest:state", state]])
+        S.last_flush = int(time.time())
+        if S.last_err.startswith("redis:"):
+            S.last_err = ""
     except Exception as e:
         S.last_err = "redis: " + _err(e)
         async with _lock:
@@ -268,6 +275,7 @@ async def _maybe_anchor():
             S.last_err = ""
     except Exception as e:
         S.last_err = "anchor: " + _err(e)
+        S.last_try = time.time() + 3000  # back off about 1 hour (e.g. address not funded yet)
     finally:
         S.anchoring = False
 
@@ -378,7 +386,7 @@ async def attest_status():
     out = {
         "enabled": bool(_ATT_ON and S.ok), "reason": S.reason, "persistent": S.persistent,
         "pubkey": S.pubs or None, "chain_length": S.n, "head": S.head, "today": S.day, "today_count": S.day_n,
-        "anchored_days": len(S.anchors),
+        "anchored_days": len(S.anchors), "unsaved_records": len(S.buf), "last_saved_at": S.last_flush or None,
         "last_anchor": ({"date": last, **S.anchors[last], "solscan": "https://solscan.io/tx/" + S.anchors[last]["tx"]}
                         if last else None),
         "pending_days": sorted(d for d in S.closing if d not in S.anchors),
