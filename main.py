@@ -116,6 +116,8 @@ _LOADER_PARTS = [
 ("part105.py", 0, "SKIP"),
 ("part106.py", 0, "SKIP"),
 ("part107.py", 0, "SKIP"),
+("part108.py", 0, "SKIP"),  # outcome labels + valid_for_s + would_change
+    ("part109.py", 0, "SKIP"),  # /benchmark/daily
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
 ]
 
