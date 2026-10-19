@@ -86,6 +86,7 @@ _LOADER_PARTS = [
     ("part76.py", 0, "SKIP"),  # Autonomic + prerug bench + packaging
     ("part77.py", 0, "SKIP"),  # Autonomic Breath
     ("part78.py", 0, "SKIP"),  # Evidence discipline
+("part78b.py", 0, "SKIP"),  # sync decision.verdict with capped verdict
     ("part79.py", 0, "SKIP"),  # Flag evidence labels
     ("part80.py", 0, "SKIP"),  # Snapshot diff /diff
     ("part81.py", 0, "SKIP"),  # Omni-first agent packaging
