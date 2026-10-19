@@ -1,33 +1,74 @@
-# ---------- v2.90: Remaining plan — outcome labels + agent honesty ----------
-# 1) resolve_due → on_outcome_for_si / shadow_avoid / prerug labels (judged > 0)
+# ---------- v2.90.1: Remaining plan — outcome labels + agent honesty (reviewed) ----------
+# 1) resolve_due -> on_outcome_for_si / shadow_avoid / prerug labels (judged > 0)
 # 2) decision.valid_for_s always set
 # 3) would_change_my_mind filled from unknowns/blockers when empty
-# 4) survival_note prefers measured early_horizons; no new DNA/persona
-VERSION = "2.90.0"
+# 4) survival_note: pointer only (no new DNA/persona)
+# Review fixes vs v2.90.0:
+#   - never label a token "bad" because the price fetch FAILED (old code did: failed fetch -> pair None -> bad)
+#   - SOL no longer added to the DexScreener request (it crowded out the real tokens and was never used)
+#   - pick_best_pair errors fall back to the highest-liquidity pair instead of failing every token
+#   - snapshots with no usable start price AND no start liquidity are skipped (cannot be judged)
+#   - each snapshot is labelled at most once; callbacks are called once (no blind retry on TypeError)
+VERSION = "2.90.1"
 app.version = VERSION
 app.openapi_schema = None
 
+import inspect
 import time
 from typing import Any, Dict, List, Optional
 
-# ---- 1) Wrap resolve_due so labels actually land ----
 _prev_resolve_108 = resolve_due
+_LABELED_108: set = set()
+_STAT_108 = {"labeled": 0, "bad": 0, "skipped_unjudgeable": 0, "skipped_fetch_failed": 0}
 
 
+def _call_cb(cb, client, mint, bad, meta):
+    """Call an outcome callback once, with the signature it actually has."""
+    try:
+        params = inspect.signature(cb).parameters.values()
+    except (TypeError, ValueError):
+        params = []
+    plist = list(params)
+    takes_meta = len(plist) >= 4 or any(p.kind == p.VAR_POSITIONAL for p in plist)
+    return cb(client, mint, bad, meta) if takes_meta else cb(client, mint, bad)
+
+
+def _best_pair_108(pairs: list, mint: str) -> Optional[dict]:
+    cand = [p for p in pairs if (p.get("baseToken") or {}).get("address") == mint]
+    if not cand:
+        return None
+    fn = globals().get("pick_best_pair")
+    if callable(fn):
+        try:
+            r = fn(cand, mint)
+            if r is not None:
+                return r
+        except Exception:
+            pass
+
+    def liq(p):
+        try:
+            return float((p.get("liquidity") or {}).get("usd") or 0)
+        except (TypeError, ValueError):
+            return 0.0
+
+    return max(cand, key=liq)
+
+
+# ---- 1) Wrap resolve_due so labels actually land ----
 async def resolve_due(client: "httpx.AsyncClient") -> int:
     snaps: List[dict] = []
     try:
         now = int(time.time())
         batch = int(globals().get("RESOLVE_BATCH") or 20)
-        got = await redis_pipe(
-            client, [["ZRANGEBYSCORE", "due", "-inf", now, "LIMIT", 0, batch]]
-        )
-        ids = (got or [[]])[0] or []
+        got = await redis_pipe(client, [["ZRANGEBYSCORE", "due", "-inf", now, "LIMIT", 0, batch]])
+        ids = [i for i in ((got or [[]])[0] or []) if i not in _LABELED_108]
         if ids:
             hashes = await redis_pipe(client, [["HGETALL", f"pred:{i}"] for i in ids])
-            for h in hashes or []:
+            for i, h in zip(ids, hashes or []):
                 d = to_dict(h)
                 if d.get("mint"):
+                    d["_id"] = i
                     snaps.append(d)
     except Exception as e:
         print(f"[part108] pre-resolve: {e}")
@@ -38,21 +79,19 @@ async def resolve_due(client: "httpx.AsyncClient") -> int:
 
     try:
         mints = sorted({d["mint"] for d in snaps})
-        sol = globals().get("SOL_MINT") or "So11111111111111111111111111111111111111112"
-        ask = mints if sol in mints else mints + [sol]
-        best: Dict[str, Optional[dict]] = {}
+        best: Optional[Dict[str, Optional[dict]]] = None  # None = fetch failed -> do not label anything
         try:
-            url = f"https://api.dexscreener.com/latest/dex/tokens/{','.join(ask)}"
-            resp = await client.get(url)
+            resp = await client.get("https://api.dexscreener.com/latest/dex/tokens/" + ",".join(mints))
+            if getattr(resp, "status_code", 200) != 200:
+                raise RuntimeError(f"dexscreener status {resp.status_code}")
             pairs = (resp.json() or {}).get("pairs") or []
-            for m in mints:
-                cand = [p for p in pairs if (p.get("baseToken") or {}).get("address") == m]
-                if "pick_best_pair" in globals():
-                    best[m] = pick_best_pair(cand, m)
-                else:
-                    best[m] = cand[0] if cand else None
-        except Exception:
-            best = {}
+            if pairs:
+                best = {m: _best_pair_108(pairs, m) for m in mints}
+        except Exception as e:
+            print(f"[part108] price fetch: {e}")
+        if best is None:
+            _STAT_108["skipped_fetch_failed"] += len(snaps)
+            return n  # retry next cycle; a failed fetch is not evidence the token died
 
         bad_ret = float(globals().get("BAD_RETURN_PCT") or -50)
         bad_liq = float(globals().get("BAD_LIQ_RATIO") or 0.3)
@@ -60,16 +99,25 @@ async def resolve_due(client: "httpx.AsyncClient") -> int:
         now = int(time.time())
 
         for d in snaps:
-            mint = d.get("mint")
+            mint, sid = d.get("mint"), d.get("_id")
             if not mint:
                 continue
-            age = now - int(d.get("ts") or 0)
-            if age > horizon * 3:
+            if len(_LABELED_108) > 5000:
+                _LABELED_108.clear()
+            if sid is not None:
+                _LABELED_108.add(sid)
+            if now - int(float(d.get("ts") or 0)) > horizon * 3:
                 continue
-            p0, l0 = float(d.get("price") or 0), float(d.get("liq") or 0)
+            try:
+                p0, l0 = float(d.get("price") or 0), float(d.get("liq") or 0)
+            except (TypeError, ValueError):
+                p0, l0 = 0.0, 0.0
+            if p0 <= 0 and l0 <= 0:
+                _STAT_108["skipped_unjudgeable"] += 1  # snapshot has no start price/liquidity: cannot judge
+                continue
             pair = best.get(mint)
             if pair is None:
-                ret, liq_ratio = -100.0, 0.0
+                ret, liq_ratio = -100.0, 0.0  # pair is gone
             else:
                 try:
                     p1 = float(pair.get("priceUsd") or 0)
@@ -79,31 +127,17 @@ async def resolve_due(client: "httpx.AsyncClient") -> int:
                 ret = (p1 / p0 - 1) * 100 if p0 > 0 else 0.0
                 liq_ratio = l1 / l0 if l0 > 0 else 1.0
             bad = bool(ret <= bad_ret or liq_ratio <= bad_liq)
+            _STAT_108["labeled"] += 1
+            _STAT_108["bad"] += 1 if bad else 0
 
-            fn = globals().get("on_outcome_for_si")
-            if callable(fn):
-                try:
-                    await fn(client, mint, bad)
-                except TypeError:
-                    try:
-                        await fn(client, mint, bad, {"source": "part108"})
-                    except Exception as e:
-                        print(f"[part108] on_outcome: {e}")
-                except Exception as e:
-                    print(f"[part108] on_outcome: {e}")
-
-            for name in ("shadow_avoid_on_outcome", "prerug_on_outcome", "residual_on_outcome"):
+            names = ("on_outcome_for_si", "shadow_avoid_on_outcome", "prerug_on_outcome", "residual_on_outcome")
+            for name in names:
                 cb = globals().get(name)
                 if callable(cb):
                     try:
-                        await cb(client, mint, bad, {"source": "part108"})
-                    except TypeError:
-                        try:
-                            await cb(client, mint, bad)
-                        except Exception:
-                            pass
-                    except Exception:
-                        pass
+                        await _call_cb(cb, client, mint, bad, {"source": "part108"})
+                    except Exception as e:
+                        print(f"[part108] {name}: {e}")
     except Exception as e:
         print(f"[part108] post-resolve: {e}")
     return n
@@ -142,10 +176,6 @@ def _would_change(r: dict) -> List[str]:
 
 
 def _survival_note(r: dict) -> Optional[dict]:
-    """Prefer measured horizons from last stats snapshot if present; else None."""
-    st = globals().get("_raw_st") or {}
-    raw = st.get("st") if isinstance(st, dict) else None
-    # Soft: attach only a pointer — UI already plots survival from cohorts
     return {
         "basis": "measured_cohort",
         "note": "Use early_horizons / survival on /stats and card; not a per-token forecast.",
@@ -184,4 +214,4 @@ async def build_signal(client, mint, security, *args, **kwargs):
         return res
 
 
-print(f"[part108] v{VERSION} resolve→labels · valid_for_s · would_change_my_mind")
+print(f"[part108] v{VERSION} resolve->labels (safe) . valid_for_s . would_change_my_mind")
