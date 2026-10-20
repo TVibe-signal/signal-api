@@ -86,42 +86,44 @@ _LOADER_PARTS = [
     ("part76.py", 0, "SKIP"),  # Autonomic + prerug bench + packaging
     ("part77.py", 0, "SKIP"),  # Autonomic Breath
     ("part78.py", 0, "SKIP"),  # Evidence discipline
-("part78b.py", 0, "SKIP"),  # sync decision.verdict with capped verdict
+    ("part78b.py", 0, "SKIP"),  # sync decision.verdict with capped verdict
     ("part79.py", 0, "SKIP"),  # Flag evidence labels
     ("part80.py", 0, "SKIP"),  # Snapshot diff /diff
     ("part81.py", 0, "SKIP"),  # Omni-first agent packaging
     ("part82.py", 0, "SKIP"),  # Daily journal + prerug bench public
-("part83.py", 0, "SKIP"),  # live-test fixes (v2.62.0)
-("part84.py", 0, "SKIP"), 
-("part85.py", 0, "SKIP"),  # Attention Residual Fusion
+    ("part83.py", 0, "SKIP"),  # live-test fixes (v2.62.0)
+    ("part84.py", 0, "SKIP"),
+    ("part85.py", 0, "SKIP"),  # Attention Residual Fusion
     ("part86.py", 0, "SKIP"),  # Residual outcome learning
     ("part87.py", 0, "SKIP"),  # Pre-rug labeled_n on outcome
-("part88.py", 0, "SKIP"),  # product + llms residual surface
+    ("part88.py", 0, "SKIP"),  # product + llms residual surface
     ("part89.py", 0, "SKIP"),  # offline feature export JSONL buffer
     ("part90.py", 0, "SKIP"),  # Shadow signals
-("part91.py", 0, "SKIP"),  # selection-bias / seed cohort panel
+    ("part91.py", 0, "SKIP"),  # selection-bias / seed cohort panel
     ("part92.py", 0, "SKIP"),  # multi-horizon surface
     ("part93.py", 0, "SKIP"),  # shadow avoid-recall rules
     ("part94.py", 0, "SKIP"),  # agent snippets + SI reading order
     ("part95.py", 0, "SKIP"),  # key request + upstream status
-("part96.py", 0, "SKIP"),  # calibration fixes
-("part97.py", 0, "SKIP"),  # /stats fixes
-("part98.py", 0, "SKIP"),  # upstream counters + limiter
-("part99.py", 0, "SKIP"),  # evidence-calibrated reasoning
-("part100.py", 0, "SKIP"),  # shadow outcome wire + fair-use + donate
-("part101.py", 0, "SKIP"),  # donate banner
-("part102.py", 0, "SKIP"),  # brand + motion
-("part103.py", 0, "SKIP"),  # agent-first home + donate SOL
-("part104.py", 0, "SKIP"),  # TVibe home + mint check + donate
-("part105.py", 0, "SKIP"),
-("part106.py", 0, "SKIP"),
-("part107.py", 0, "SKIP"),
-("part108.py", 0, "SKIP"),  # outcome labels (reviewed)
-("part109.py", 0, "SKIP"),  # /benchmark/daily
-("part110.py", 0, "SKIP"),  # deployer shadow
-("part111.py", 0, "SKIP"),  # llms.txt
-("part112.py", 0, "SKIP"),  # response cache
-("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
+    ("part96.py", 0, "SKIP"),  # calibration fixes
+    ("part97.py", 0, "SKIP"),  # /stats fixes
+    ("part98.py", 0, "SKIP"),  # upstream counters + limiter
+    ("part99.py", 0, "SKIP"),  # evidence-calibrated reasoning
+    ("part100.py", 0, "SKIP"),  # shadow outcome wire + fair-use + donate
+    ("part101.py", 0, "SKIP"),  # donate banner
+    ("part102.py", 0, "SKIP"),  # brand + motion
+    ("part103.py", 0, "SKIP"),  # agent-first home + donate SOL
+    ("part104.py", 0, "SKIP"),  # TVibe home + mint check + donate
+    ("part105.py", 0, "SKIP"),  # signed verdicts + hash chain + daily anchor
+    ("part106.py", 0, "SKIP"),  # cost to sell add-on
+    ("part107.py", 0, "SKIP"),  # /verify page + results by source
+    ("part108.py", 0, "SKIP"),  # outcome labels + valid_for_s + would_change
+    ("part109.py", 0, "SKIP"),  # /benchmark/daily
+    ("part110.py", 0, "SKIP"),  # deployer shadow from our outcomes
+    ("part111.py", 0, "SKIP"),  # llms.txt TVibe Signal
+    ("part112.py", 0, "SKIP"),  # response cache (/stats, /exit, /benchmark/daily)
+    # ("part113.py", 0, "SKIP"),  # optional: display fixes (remove the # to enable)
+    ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
+]
 
 
 def _load_parts():
