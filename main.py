@@ -39,7 +39,6 @@ _LOADER_PARTS = [
     ("part25.py", 119, "1ede2b 7885ba 23e645 e72294 dd0e51 266990"),
     ("part26.py", 487, "3d321f bc9a90 86edbc cf91fe c7df0f 6666cb 8b3810 371096 e682be 9805e8 1ca398 0f3b2a 521f55 49f8ad 67f5b0 b09fe9 a1ed82 a10621 9aaa53 f85d70 ebb73b f7fbc1 fa91c2 acac49 e58210"),
     # ("part27.py", 0, "SKIP"),  # Telegram OFF — use part114 only
-...
     ("part28.py", 310, "cbb9c4 c1bb76 a7d79c 1bd50e 5dbcd7 869b5e 35cbf6 167ddf 6f930a c984f9 e870fe f2af5c eeac36 ad14bf 9abf74 66be11"),
     ("part29.py", 27, "d18441 9569d7"),
     ("part30.py", 68, "3500d5 c11459 937a5d ff8e38"),
