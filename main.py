@@ -124,8 +124,8 @@ _LOADER_PARTS = [
     # ("part113.py", 0, "SKIP"),  # optional display fixes
     ("part114.py", 0, "SKIP"),  # Telegram bot
     ("part115.py", 0, "SKIP"),  # Telegram UX polish
-    ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),
-
+    ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
+]  
 def _load_parts():
     def checksum(block):
         return hashlib.sha1("\n".join(text for _, text in block).encode()).hexdigest()[:6]
