@@ -1,29 +1,25 @@
-# part116.py — System circuit breaker (source health → soft degrade)
-# Does NOT block the API forever. Opens when upstream is sick; agents see system_stress.
-VERSION = "2.93.0"
+# part116.py - System circuit breaker (source health -> soft degrade) (v2.93.1, reviewed)
+# Opens when BOTH DexScreener and Solana RPC fail 3 times in a row; agents then see system_stress.
+# Review fixes vs v2.93.0:
+#   - it could never close again (the "half" state was only computed in a copy), so after ONE outage every
+#     verdict stayed capped to caution forever. It now closes after the hold time as soon as a source answers ok.
+#   - verdict_capped_by stays a list (part78 uses a list); major assets (SOL, USDC...) are not capped.
+VERSION = "2.93.1"
 app.version = VERSION
 app.openapi_schema = None
 
 import time
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
-_CB = {
-    "state": "closed",          # closed | open | half
-    "opened_at": 0.0,
-    "reason": "",
-    "open_for_s": 90,           # stay open at least this long
-    "dex_fail_streak": 0,
-    "rpc_fail_streak": 0,
-}
-
-_CB_OPEN_S = 90
+_CB = {"state": "closed", "opened_at": 0.0, "reason": "", "open_for_s": 90,
+       "dex_fail_streak": 0, "rpc_fail_streak": 0}
 _CB_STREAK = 3
 
 
 def circuit_status() -> Dict[str, Any]:
     now = time.time()
     st = dict(_CB)
-    if st["state"] == "open" and now - st["opened_at"] >= st.get("open_for_s", _CB_OPEN_S):
+    if st["state"] == "open" and now - st["opened_at"] >= st["open_for_s"]:
         st["state"] = "half"
     st["now"] = now
     return st
@@ -31,24 +27,29 @@ def circuit_status() -> Dict[str, Any]:
 
 def circuit_record_source(name: str, ok: bool) -> None:
     key = "dex_fail_streak" if name in ("dexscreener", "dex") else (
-        "rpc_fail_streak" if name in ("solana_rpc", "rpc") else None
-    )
+        "rpc_fail_streak" if name in ("solana_rpc", "rpc") else None)
     if not key:
         return
-    if ok:
-        _CB[key] = 0
-    else:
-        _CB[key] = int(_CB.get(key) or 0) + 1
-    if _CB["dex_fail_streak"] >= _CB_STREAK and _CB["rpc_fail_streak"] >= _CB_STREAK:
-        if _CB["state"] != "open":
-            _CB["state"] = "open"
-            _CB["opened_at"] = time.time()
-            _CB["reason"] = "dex_and_rpc_failing"
+    _CB[key] = 0 if ok else int(_CB.get(key) or 0) + 1
+    now = time.time()
+    both_failing = _CB["dex_fail_streak"] >= _CB_STREAK and _CB["rpc_fail_streak"] >= _CB_STREAK
+    if both_failing:
+        if _CB["state"] == "closed":
+            _CB["state"], _CB["opened_at"], _CB["reason"] = "open", now, "dex_and_rpc_failing"
             print("[part116] circuit OPEN:", _CB["reason"])
-    elif _CB["state"] == "half" and ok and name in ("dexscreener", "dex", "solana_rpc", "rpc"):
-        _CB["state"] = "closed"
-        _CB["reason"] = ""
+        elif now - _CB["opened_at"] >= _CB["open_for_s"]:
+            _CB["opened_at"] = now  # still failing after the hold time: stay open another round
+    elif _CB["state"] == "open" and ok and now - _CB["opened_at"] >= _CB["open_for_s"]:
+        _CB["state"], _CB["reason"] = "closed", ""
         print("[part116] circuit CLOSED")
+
+
+def _add_cap(r: dict, tag: str) -> None:
+    cur = r.get("verdict_capped_by")
+    lst = list(cur) if isinstance(cur, list) else ([str(cur)] if cur else [])
+    if tag not in lst:
+        lst.append(tag)
+    r["verdict_capped_by"] = lst
 
 
 def circuit_apply_to_result(r: dict) -> dict:
@@ -60,19 +61,17 @@ def circuit_apply_to_result(r: dict) -> dict:
         "reason": st.get("reason") or None,
         "note": "When open/half, prefer smaller size or wait; data may be stale or partial.",
     }
-    if st["state"] in ("open", "half"):
+    if st["state"] in ("open", "half") and r.get("asset_class") != "major":
         dec = r.get("decision") if isinstance(r.get("decision"), dict) else None
         if dec is not None:
-            # never upgrade; only soft-warn
             cautions = list(dec.get("cautions") or [])
             msg = "System stress: upstream degraded (circuit %s)" % st["state"]
             if msg not in cautions:
                 cautions.append(msg)
             dec["cautions"] = cautions
-            top = r.get("verdict")
-            if top == "ok":
+            if r.get("verdict") == "ok":
                 r["verdict"] = "caution"
-                r["verdict_capped_by"] = r.get("verdict_capped_by") or "circuit_breaker"
+                _add_cap(r, "circuit_breaker")
             if dec.get("verdict") == "ok":
                 dec["verdict_raw"] = dec.get("verdict_raw") or "ok"
                 dec["verdict"] = "caution"
@@ -85,7 +84,6 @@ _build_prev_116 = globals().get("build_signal")
 async def build_signal(client, mint, security, *args, **kwargs):
     res = await _build_prev_116(client, mint, security, *args, **kwargs)
     try:
-        # light health sample from sources block if present
         body = res[0] if isinstance(res, tuple) else res
         if isinstance(body, dict):
             src = body.get("sources") or {}
@@ -107,4 +105,4 @@ async def system_circuit():
     return {"version": VERSION, **circuit_status()}
 
 
-print(f"[part116] v{VERSION} circuit breaker → GET /system/circuit")
+print(f"[part116] v{VERSION} circuit breaker (auto-closes) -> GET /system/circuit")
