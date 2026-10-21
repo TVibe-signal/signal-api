@@ -132,7 +132,8 @@ _LOADER_PARTS = [
 ("part121.py", 0, "SKIP"),
     ("part122.py", 0, "SKIP"),
     ("part123.py", 0, "SKIP"),
-    ("part124.py", 0, "SKIP"),  # redis thrift + shadow_cluster on omni
+    ("part124.py", 0, "SKIP"),
+    ("part125.py", 0, "SKIP"),  # Phase B filter contract
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),
 ]
 def _load_parts():
