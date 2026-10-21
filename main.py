@@ -130,8 +130,10 @@ _LOADER_PARTS = [
 ("part119.py", 0, "SKIP"),  # Phase1 sell-sim
     ("part120.py", 0, "SKIP"),  # Phase2 cluster shadow
 ("part121.py", 0, "SKIP"),
-    ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
-]  
+    ("part122.py", 0, "SKIP"),  # redis usage meter
+    ("part123.py", 0, "SKIP"),  # stricter shadow rule candidates
+    ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),
+]
 def _load_parts():
     def checksum(block):
         return hashlib.sha1("\n".join(text for _, text in block).encode()).hexdigest()[:6]
