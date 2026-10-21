@@ -1,5 +1,6 @@
-# part118.py — Slow learning surface: publish shadow + circuit for agents (no ML weights)
-VERSION = "2.93.0"
+# part118.py - agent map (v2.93.1, reviewed): GET /agent/brain
+# Review fix: it said "/exit has an impact band" - the band is `sim.slippage_band` on /signal and /omni (part119).
+VERSION = "2.93.1"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -11,15 +12,15 @@ async def agent_brain(request: Request):
         "version": VERSION,
         "role": "on-chain signal + measured track record; social is optional via the agent (X), not scraped here",
         "primary": "GET /omni?mint=",
-        "prove": ["GET /stats", "GET /benchmark/daily"],
+        "prove": ["GET /stats", "GET /benchmark/daily", "GET /verify"],
         "system": {},
-        "shadow": {},
+        "shadow": {"note": "See GET /stats/shadow-avoid, /stats/deployer-shadow and /stats/cluster-shadow (research only)"},
         "learning": {
             "online_ml": False,
-            "mechanism": "outcomes → calibration / shadow rules; promote only when measured",
-            "offline": "optional parquet → LightGBM later; not required for production verdicts",
+            "mechanism": "outcomes -> calibration / shadow rules; promote only when measured",
+            "offline": "optional feature export for later offline models; not used for live verdicts",
         },
-        "slippage": "GET /exit?mint= — impact band when quote works; no MEV protection claim",
+        "sell_cost": "sim.* on /signal and /omni (quote-based); GET /exit?mint= for the full quote. No MEV protection claim.",
         "disclaimer": "Heuristic. Not financial advice.",
     }
     try:
@@ -27,13 +28,7 @@ async def agent_brain(request: Request):
             out["system"] = circuit_status()
     except Exception:
         pass
-    try:
-        # best-effort: reuse public stats if handler exists
-        client = request.app.state.client
-        out["shadow"]["note"] = "See GET /stats/shadow-avoid and /stats/deployer-shadow (research only)"
-    except Exception:
-        pass
     return out
 
 
-print(f"[part118] v{VERSION} GET /agent/brain — honest agent map (no fake ML)")
+print(f"[part118] v{VERSION} GET /agent/brain")
