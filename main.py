@@ -127,6 +127,8 @@ _LOADER_PARTS = [
 ("part116.py", 0, "SKIP"),  # circuit breaker
     ("part117.py", 0, "SKIP"),  # slippage honesty
     ("part118.py", 0, "SKIP"),  # /agent/brain
+("part119.py", 0, "SKIP"),  # Phase1 sell-sim
+    ("part120.py", 0, "SKIP"),  # Phase2 cluster shadow
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
 ]  
 def _load_parts():
