@@ -134,9 +134,11 @@ _LOADER_PARTS = [
     ("part123.py", 0, "SKIP"),
     ("part124.py", 0, "SKIP"),
     ("part125.py", 0, "SKIP"),
-    ("part126.py", 0, "SKIP"),
-    ("part127.py", 0, "SKIP"),  # Phase C reliability + fair use
-    ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),
+    ("part126.py", 0, "SKIP"),  # omni filter wire
+    ("part127.py", 0, "SKIP"),  # Phase C reliability
+    ("part128.py", 0, "SKIP"),  # /pricing harden
+    ("part129.py", 0, "SKIP"),  # Phase D status (no auto-promote)
+    ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
 ]
 def _load_parts():
     def checksum(block):
