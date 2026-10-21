@@ -137,8 +137,9 @@ _LOADER_PARTS = [
     ("part126.py", 0, "SKIP"),  # omni filter wire
     ("part127.py", 0, "SKIP"),  # Phase C reliability
     ("part128.py", 0, "SKIP"),  # /pricing harden
-    ("part129.py", 0, "SKIP"),  # Phase D status (no auto-promote)
-    ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),  # MCP last
+    ("part129.py", 0, "SKIP"),
+    ("part130.py", 0, "SKIP"),  # filter.pass chip on home card
+    ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),
 ]
 def _load_parts():
     def checksum(block):
