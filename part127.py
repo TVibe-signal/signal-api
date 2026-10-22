@@ -126,4 +126,4 @@ if callable(_prev_enrich):
         return body
 
 
-print("[part127] v%s Phase C → GET /agents/reliability /pricing + reliability on signal" % VERSION)
+print("[part127] v%s Phase C → GET /agents/reliability /pricing + reliability on signal" % VERSION) 
