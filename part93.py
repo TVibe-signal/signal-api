@@ -1,5 +1,13 @@
-# ---------- v2.71: Shadow avoid-recall rules (measure first, never override live) ----------
-VERSION = "2.71.0"
+# ---------- v2.71.1: Shadow avoid-recall rules (measure first, never override live) (reviewed) ----------
+# Review fixes vs v2.71.0 (cost + correctness):
+#   - the pending marker was written on EVERY build_signal call: 4 Redis commands per query, and the counters
+#     "emitted"/"flagged_avoid" counted repeat queries of the same token. It now uses SET ... NX: the first call
+#     for a token stores the marker (and counts it once); repeat calls cost 1 command and change nothing.
+#   - because the marker was overwritten each time, an outcome could be judged against a LATER query's shadow
+#     verdict instead of the one made when the verdict was recorded. NX keeps the first one until it is judged.
+#   - note: R3 uses flags "dead_pool" and "price_collapse_24h", which are not in the flag list on /stats, so it
+#     only fires through "no_recent_trades". Check the flag names if you want R3 to do more.
+VERSION = "2.71.1"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -46,7 +54,7 @@ def shadow_avoid_verdict(result: dict) -> Dict[str, Any]:
         "shadow_verdict": shadow_verdict,
         "rules_hit": rules_hit,
         "would_flag_avoid": bool(rules_hit),
-        "note": "Shadow only — live decision unchanged. Tracked for recall experiments.",
+        "note": "Shadow only - live decision unchanged. Tracked for recall experiments.",
         "version": VERSION,
     }
 
@@ -55,12 +63,16 @@ async def _shadow_avoid_pending(client, mint: str, payload: dict) -> None:
     if not PRED_ENABLED or not client:
         return
     try:
-        await redis_pipe(client, [
-            ["SET", SHADOW_AVOID_PENDING.format(mint), json.dumps(payload), "EX", SHADOW_AVOID_TTL],
-            ["HINCRBY", SHADOW_AVOID_KEY, "emitted", 1],
-            ["HINCRBY", SHADOW_AVOID_KEY, "flagged_avoid", 1 if payload.get("would_flag_avoid") else 0],
-            ["EXPIRE", SHADOW_AVOID_KEY, 120 * 86400],
+        res = await redis_pipe(client, [
+            ["SET", SHADOW_AVOID_PENDING.format(mint), json.dumps(payload), "NX", "EX", SHADOW_AVOID_TTL],
         ])
+        created = bool(res) and res[0] in ("OK", True, 1)
+        if created:  # first query since the last judged outcome: count it once
+            await redis_pipe(client, [
+                ["HINCRBY", SHADOW_AVOID_KEY, "emitted", 1],
+                ["HINCRBY", SHADOW_AVOID_KEY, "flagged_avoid", 1 if payload.get("would_flag_avoid") else 0],
+                ["EXPIRE", SHADOW_AVOID_KEY, 120 * 86400],
+            ])
     except Exception:
         pass
 
@@ -154,4 +166,4 @@ async def stats_shadow_avoid(request: Request):
     }
 
 
-print(f"[part93] v{VERSION} shadow avoid-recall → signal.shadow_avoid + GET /stats/shadow-avoid")
+print(f"[part93] v{VERSION} shadow avoid-recall (1 command per repeat query) -> signal.shadow_avoid + GET /stats/shadow-avoid")
