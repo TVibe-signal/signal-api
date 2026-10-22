@@ -139,6 +139,7 @@ _LOADER_PARTS = [
     ("part128.py", 0, "SKIP"),  # /pricing harden
     ("part129.py", 0, "SKIP"),
     ("part130.py", 0, "SKIP"),  # filter.pass chip on home card
+("part131.py", 0, "SKIP"),  # walk-forward checklist score_35
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),
 ]
 def _load_parts():
