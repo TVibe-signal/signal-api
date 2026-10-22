@@ -1,4 +1,4 @@
-# part132.py — free-forever agent discovery (llms.txt). No paywall. No x402.
+# part132.py — free-forever agent llms.txt (override any earlier /llms.txt)
 VERSION = "3.0.3"
 app.version = VERSION
 app.openapi_schema = None
@@ -17,7 +17,6 @@ _LLMS = """# TVibe Signal
 Reading order: filter.pass → filter.reasons → decision.verdict → blockers/cautions/unknowns → sim → system_stress.
 Trust decision.* first. Treat debate / residual / dna / shadow_* as optional context only.
 When decision.unknowns is non-empty, prefer caution over size.
-If decision.verdict_raw is present, the verdict was lowered (capped) from that value.
 
 ## Agent pattern (before size)
 1. omni(mint) or GET /omni?mint=
@@ -25,25 +24,19 @@ If decision.verdict_raw is present, the verdict was lowered (capped) from that v
 3. if pass and verdict ok → still read cautions, sim, system_stress
 4. cache mint for valid_for_s seconds (often \~120)
 
-## Prove it (do not skip)
+## Prove it
 - GET /stats
 - GET /stats/rule-candidates
-- GET /filter/walk-forward   (score_35 checklist — promote_allowed false until operator)
+- GET /filter/walk-forward
 - GET /benchmark/daily
-
-## Honesty fields
-- blockers, cautions, positives, unknowns
-- valid_for_s, would_change_my_mind, track_record_context
-- system_stress, sim (Jupiter quote heuristic — not full honeypot VM)
 
 ## Fair use (always free core)
 - best_effort_free — /agents/reliability · /pricing
-- \~30 req/min without a key. Heavy use: self-host.
+- \~30 req/min. Heavy use: self-host.
 - Cron: GET /ping every 10–14m (do not save large response bodies)
 
 ## Secondary
-- /signal · /signals?mints= (max 10) · /exit · /health · /ping
-- /stats/deployer-shadow · /stats/shadow-avoid (research only)
+- /signal · /signals · /exit · /health · /ping
 
 ## Repo · social
 - https://github.com/TVibe-signal/signal-api
@@ -54,6 +47,15 @@ If decision.verdict_raw is present, the verdict was lowered (capped) from that v
 Heuristics for agents and research. Not financial advice. Data can be late, partial, or wrong.
 """
 
+# Drop any earlier /llms.txt so this handler wins
+try:
+    app.router.routes[:] = [
+        r for r in app.router.routes
+        if not (getattr(r, "path", None) == "/llms.txt")
+    ]
+except Exception:
+    pass
+
 
 @app.get("/llms.txt", include_in_schema=False)
 async def llms_txt_free_forever():
@@ -61,4 +63,4 @@ async def llms_txt_free_forever():
     return PlainTextResponse(_LLMS, media_type="text/plain; charset=utf-8")
 
 
-print("[part132] v%s free llms.txt — filter gate + agent pattern" % VERSION)
+print("[part132] v%s /llms.txt overridden — filter.pass + free forever" % VERSION)
