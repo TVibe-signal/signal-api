@@ -139,7 +139,7 @@ _LOADER_PARTS = [
     ("part128.py", 0, "SKIP"),  # /pricing harden
     ("part129.py", 0, "SKIP"),
     ("part130.py", 0, "SKIP"),
-    ("part131.py", 0, "SKIP"),  # optional walk-forward
+    ("part131.py", 0, "SKIP"),  # walk-forward daily snapshots
     ("part132.py", 0, "SKIP"),  # free agent llms.txt
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),
 ]
