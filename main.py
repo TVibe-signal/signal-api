@@ -144,6 +144,7 @@ _LOADER_PARTS = [
     ("part133.py", 0, "SKIP"),
     ("part134.py", 0, "SKIP"),
     ("part135.py", 0, "SKIP"),
+("part136.py", 0, "SKIP"),
     ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),
 ]
 def _load_parts():
