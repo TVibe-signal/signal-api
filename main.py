@@ -141,9 +141,10 @@ _LOADER_PARTS = [
     ("part130.py", 0, "SKIP"),
     ("part131.py", 0, "SKIP"),  # walk-forward daily snapshots
     ("part132.py", 0, "SKIP"),  # free agent llms.txt
-    ("part133.py", 0, "SKIP"),  # Telegram on web nav
-    ("part7.py", 127, "3cb58c dc8bcc 5f4f96 8d1647 05d9f8 f88499 86b940"),
-]
+    ("part133.py", 0, "SKIP"),  # Telegram nav
+    ("part134.py", 0, "SKIP"),  # ops health + schema_version
+    ("part135.py", 0, "SKIP"),  # brand cleanup (nếu đã commit)
+    ("part7.py", 127, "…"),
 def _load_parts():
     def checksum(block):
         return hashlib.sha1("\n".join(text for _, text in block).encode()).hexdigest()[:6]
