@@ -7728,6 +7728,133 @@ except Exception as _e:
 print("[part139] v%s /agent/playbook (+ .txt) fixed agent workflow" % VERSION)
 
 
+
+# --- part140: rules_version (versioned heuristics, honest cost-of-attack) ---
+# schema_version = API shape; rules_version = risk policy / thresholds.
+# Changing thresholds = bump RULES_VERSION + one-line changelog. No stealth retune.
+# Injected into /omni, /signal, view=agent, playbook, agent-card.
+
+VERSION = "3.0.10"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+import os
+import time
+
+# Bump when hard/soft thresholds or promote-shadow policy change (not every deploy).
+RULES_VERSION = os.environ.get("RULES_VERSION", "2026.10.28.a").strip() or "2026.10.28.a"
+RULES_CHANGELOG = [
+    {
+        "rules_version": "2026.10.28.a",
+        "at": "2026-10-28",
+        "note": "Baseline public policy: authorities + concentration + exit-aware filter; wallet_intel shadow only; agent view=action contract.",
+    },
+]
+
+
+def _attach_rules_meta(d: dict) -> dict:
+    if not isinstance(d, dict):
+        return d
+    d["rules_version"] = RULES_VERSION
+    # keep schema_version if an older part set it
+    if "schema_version" not in d and globals().get("SCHEMA_VERSION"):
+        d["schema_version"] = globals().get("SCHEMA_VERSION")
+    return d
+
+
+# Wrap build_omni
+_bo_prev_rv = globals().get("build_omni")
+if callable(_bo_prev_rv):
+    async def build_omni(client, mint: str, *args, **kwargs):
+        pkt = await _bo_prev_rv(client, mint, *args, **kwargs)
+        if isinstance(pkt, dict):
+            _attach_rules_meta(pkt)
+        return pkt
+
+# Wrap build_signal so /signal and internal paths also carry it
+_bs_prev_rv = globals().get("build_signal")
+if callable(_bs_prev_rv):
+    async def build_signal(client, mint, security, *args, **kwargs):
+        res = await _bs_prev_rv(client, mint, security, *args, **kwargs)
+        try:
+            if isinstance(res, tuple) and res and isinstance(res[0], dict):
+                _attach_rules_meta(res[0])
+            elif isinstance(res, dict):
+                _attach_rules_meta(res)
+        except Exception:
+            pass
+        return res
+
+# Enrich agent_view helper if present
+_av_prev = globals().get("_tvibe_agent_view")
+if callable(_av_prev):
+    def _tvibe_agent_view(pkt: dict) -> dict:
+        out = _av_prev(pkt)
+        if isinstance(out, dict):
+            out["rules_version"] = RULES_VERSION
+            if globals().get("SCHEMA_VERSION"):
+                out.setdefault("schema_version", globals().get("SCHEMA_VERSION"))
+        return out
+
+# Playbook + card
+try:
+    pb = globals().get("_PLAYBOOK")
+    if isinstance(pb, dict):
+        pb["rules_version"] = RULES_VERSION
+        pb["rules_changelog_head"] = RULES_CHANGELOG[-1] if RULES_CHANGELOG else None
+        pb["version"] = VERSION
+except Exception as e:
+    print("[part140] playbook:", str(e)[:80])
+
+try:
+    card = globals().get("_AGENT_CARD")
+    if isinstance(card, dict):
+        card["rules_version"] = RULES_VERSION
+        card["version"] = VERSION
+        eps = card.setdefault("endpoints", {})
+        eps["rules"] = "GET /rules"
+except Exception as e:
+    print("[part140] card:", str(e)[:80])
+
+
+@app.get("/rules", tags=["product"], summary="Public risk-rules version + changelog (no stealth retune)")
+@app.get("/rules.json", include_in_schema=False)
+async def rules_public():
+    return {
+        "rules_version": RULES_VERSION,
+        "app_version": VERSION,
+        "schema_version": globals().get("SCHEMA_VERSION"),
+        "policy": {
+            "stealth_retune": False,
+            "shadow_promote_requires_stats": True,
+            "blacklist": "soft_caution_only_if_enabled",
+            "agent_contract": "GET /omni?mint=&view=agent",
+        },
+        "changelog": RULES_CHANGELOG[-10:],
+        "nfa": True,
+        "updated_hint": "Bump RULES_VERSION env or constant when thresholds change; log a changelog line.",
+    }
+
+
+# Optional: stamp rules_version into /stats payload via wrapper if stats_report exists
+_stats_prev = globals().get("stats_report")
+if callable(_stats_prev):
+    async def stats_report(client, *args, **kwargs):
+        rep = await _stats_prev(client, *args, **kwargs)
+        if isinstance(rep, dict):
+            rep["rules_version"] = RULES_VERSION
+            rep.setdefault("caveats", [])
+            note = "Compare outcomes only within the same rules_version when judging precision."
+            if note not in (rep.get("caveats") or []):
+                rep["caveats"] = list(rep.get("caveats") or []) + [note]
+        return rep
+
+print("[part140] v%s rules_version=%s on omni/signal/agent + GET /rules" % (VERSION, RULES_VERSION))
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
