@@ -7370,6 +7370,225 @@ except Exception as e:
 print("[part136] wallet_intel deployer+bundle shadow -> result.wallet_intel /stats/wallet-intel")
 
 
+
+# --- part138: agent-first surface (view=agent + agent-card + llms hint) ---
+# Clean action contract for agents without SI noise. Free forever spirit.
+# GET /omni?mint=...&view=agent
+# GET /.well-known/agent-card.json
+VERSION = "3.0.8"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+from fastapi import Query
+from fastapi.responses import JSONResponse, PlainTextResponse
+
+
+def _tvibe_agent_view(pkt: dict) -> dict:
+    """Stable, minimal contract for AI agents. Heuristic, not advice."""
+    if not isinstance(pkt, dict):
+        return {"error": "bad_packet", "nfa": True}
+    if pkt.get("error"):
+        return {
+            "mint": pkt.get("mint"),
+            "action": "skip",
+            "verdict": "avoid",
+            "filter": {"pass": False},
+            "confidence": "low",
+            "blockers": [str(pkt.get("error"))],
+            "cautions": [],
+            "unknowns": ["signal_failed"],
+            "wallet_intel": {"shadow": True, "flags": []},
+            "risk_score": None,
+            "valid_for_s": 0,
+            "nfa": True,
+        }
+    dec = pkt.get("decision") if isinstance(pkt.get("decision"), dict) else {}
+    f = pkt.get("filter") if isinstance(pkt.get("filter"), dict) else {}
+    wi = pkt.get("wallet_intel") if isinstance(pkt.get("wallet_intel"), dict) else {}
+    blockers = list(dec.get("blockers") or [])
+    cautions = list(dec.get("cautions") or [])[:6]
+    unknowns = list(dec.get("unknowns") or [])[:6]
+    verdict = (dec.get("verdict") or pkt.get("verdict") or "caution")
+    if isinstance(verdict, str):
+        verdict = verdict.lower()
+    else:
+        verdict = "caution"
+    pass_ = f.get("pass")
+    flags = list(wi.get("flags") or [])
+    if pass_ is True and not blockers and verdict != "avoid":
+        action = "pass"
+    elif verdict == "avoid" or blockers or pass_ is False:
+        action = "skip" if (verdict == "avoid" or blockers) else "review"
+    else:
+        action = "review"
+    # confidence: never "high" without clear data; unknowns force low
+    if unknowns:
+        confidence = "low"
+    elif action == "pass" and not flags:
+        confidence = "medium"
+    else:
+        confidence = "medium" if action == "review" else "low"
+    return {
+        "mint": pkt.get("mint"),
+        "action": action,  # pass | review | skip
+        "verdict": verdict,
+        "filter": {"pass": bool(pass_) if pass_ is not None else False},
+        "confidence": confidence,
+        "blockers": blockers,
+        "cautions": cautions,
+        "unknowns": unknowns,
+        "wallet_intel": {"shadow": True, "flags": flags},
+        "risk_score": dec.get("risk_score") if dec.get("risk_score") is not None else pkt.get("risk_score"),
+        "liquidity_usd": pkt.get("liquidity_usd"),
+        "valid_for_s": 30,
+        "nfa": True,
+        "docs": "/llms.txt",
+        "full_omni": True,  # omit view=agent for full packet
+    }
+
+
+_AGENT_CARD = {
+    "name": "TVibe Signal",
+    "description": (
+        "Free Solana token risk filter for AI agents. One call: decision + filter.pass + "
+        "optional wallet_intel (shadow). Measured track record on /stats. Not financial advice."
+    ),
+    "url": "https://signal-api-24q4.onrender.com",
+    "provider": {"organization": "TVibe Signal", "url": "https://x.com/realTVibe"},
+    "version": VERSION,
+    "documentationUrl": "https://signal-api-24q4.onrender.com/llms.txt",
+    "capabilities": {
+        "streaming": False,
+        "pushNotifications": False,
+        "stateTransitionHistory": False,
+    },
+    "defaultInputModes": ["text"],
+    "defaultOutputModes": ["application/json"],
+    "skills": [
+        {
+            "id": "omni-token-risk",
+            "name": "Token risk (omni)",
+            "description": "GET /omni?mint=<MINT>&view=agent — action pass|review|skip, filter.pass, blockers, unknowns.",
+            "tags": ["solana", "risk", "memecoin", "rug", "agent"],
+            "examples": [
+                "Check mint CA8q2mkYWZnUNqYmf6pxyxAPZsmSe2EG9P7hHMW5pump",
+                "Should an agent size this token? Use view=agent",
+            ],
+        },
+        {
+            "id": "track-record",
+            "name": "Measured outcomes",
+            "description": "GET /stats — how past verdicts performed after horizons.",
+            "tags": ["stats", "calibration"],
+            "examples": ["Show avoid precision vs baseline"],
+        },
+        {
+            "id": "mcp",
+            "name": "MCP tools",
+            "description": "Streamable HTTP MCP at /mcp — check_token_risk, check_tokens_batch, check_exit, get_track_record.",
+            "tags": ["mcp"],
+            "examples": ["Connect MCP client to https://signal-api-24q4.onrender.com/mcp"],
+        },
+    ],
+    "mcp": {"url": "https://signal-api-24q4.onrender.com/mcp", "transport": "streamable-http"},
+    "endpoints": {
+        "omni": "GET /omni?mint=<MINT>",
+        "omni_agent": "GET /omni?mint=<MINT>&view=agent",
+        "stats": "GET /stats",
+        "health": "GET /health",
+        "llms": "GET /llms.txt",
+    },
+    "pricing": "free",
+    "nfa": True,
+}
+
+
+@app.get("/.well-known/agent-card.json", include_in_schema=False)
+@app.get("/agent-card.json", include_in_schema=False)
+async def agent_card_json():
+    return JSONResponse(_AGENT_CARD)
+
+
+# Rebind /omni with view= query (drop older GET /omni routes that only take mint)
+try:
+    app.router.routes[:] = [
+        r for r in app.router.routes
+        if not (
+            getattr(r, "path", None) == "/omni"
+            and getattr(r, "methods", None)
+            and "GET" in (r.methods or set())
+        )
+    ]
+except Exception as _e:
+    print("[part138] could not drop old /omni:", str(_e)[:100])
+
+
+@app.get("/omni", tags=["product"])
+async def omni_agent_endpoint(
+    request: Request,
+    mint: str = Query(..., min_length=32, max_length=64),
+    view: str = Query("full", description="full | agent (minimal action contract)"),
+):
+    wait = rate_limited(client_ip(request), cost=4)
+    if wait:
+        raise too_many(wait)
+    mint = (mint or "").strip()
+    if not MINT_RE.match(mint):
+        raise HTTPException(status_code=400, detail="Invalid Solana token mint address")
+    client = request.app.state.client
+    pkt = await build_omni(client, mint)
+    if (view or "").strip().lower() in ("agent", "compact", "action"):
+        return _tvibe_agent_view(pkt if isinstance(pkt, dict) else {})
+    return pkt
+
+
+_LLMS_AGENT_TAIL = """
+
+## Agent-first (clean input)
+- Preferred: GET /omni?mint=<MINT>&view=agent
+- Returns only: action (pass|review|skip), verdict, filter.pass, confidence, blockers, cautions, unknowns, wallet_intel.flags, risk_score, valid_for_s, nfa
+- Full packet: omit view=agent
+- Discovery: GET /.well-known/agent-card.json
+- MCP: https://signal-api-24q4.onrender.com/mcp
+- Always honor unknowns non-empty → lower confidence; never treat verdict as guarantee
+- Not financial advice
+"""
+
+try:
+    app.router.routes[:] = [r for r in app.router.routes if getattr(r, "path", None) != "/llms.txt"]
+except Exception as _e:
+    print("[part138] llms route drop:", str(_e)[:80])
+
+_prev_llms = globals().get("llms_txt_free_core") or globals().get("llms_txt_v291")
+
+
+@app.get("/llms.txt", include_in_schema=False)
+async def llms_txt_agent_first():
+    body = ""
+    if callable(_prev_llms):
+        try:
+            prev = await _prev_llms()
+            body = prev.body.decode() if hasattr(prev, "body") else (prev if isinstance(prev, str) else str(prev))
+        except Exception:
+            body = ""
+    if not body:
+        body = (
+            "TVibe Signal — free Solana token risk for agents\n"
+            "Primary: GET /omni?mint=<MINT>&view=agent\n"
+            "MCP: https://signal-api-24q4.onrender.com/mcp\n"
+            "Stats: GET /stats\n"
+        )
+    if "view=agent" not in body:
+        body = body.rstrip() + "\n" + _LLMS_AGENT_TAIL
+    return PlainTextResponse(body)
+
+
+print("[part138] v%s agent-first: /omni?view=agent + /.well-known/agent-card.json + llms" % VERSION)
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
