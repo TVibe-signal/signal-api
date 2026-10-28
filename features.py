@@ -5968,6 +5968,13 @@ async def build_omni(client, mint: str) -> dict:
         "pre_rug": prerug,
         "would_change_my_mind": would_change,
         "summary": sig.get("summary"),
+        # part137: surface agent-critical fields from build_signal (no second fetch)
+        "filter": sig.get("filter"),
+        "wallet_intel": sig.get("wallet_intel"),
+        "research_flags": sig.get("research_flags"),
+        "security": sig.get("security"),
+        "liquidity_usd": sig.get("liquidity_usd"),
+        "pair_age_minutes": sig.get("pair_age_minutes"),
         "version": VERSION,
     }
 
