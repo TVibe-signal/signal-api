@@ -7589,6 +7589,145 @@ async def llms_txt_agent_first():
 print("[part138] v%s agent-first: /omni?view=agent + /.well-known/agent-card.json + llms" % VERSION)
 
 
+
+# --- part139: agent playbook (fixed workflow, no code mutation) ---
+# Agents read this and follow steps. Humans gate any code change.
+VERSION = "3.0.9"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+from fastapi.responses import JSONResponse, PlainTextResponse
+
+_BASE = (os.environ.get("PUBLIC_BASE_URL") or "https://signal-api-24q4.onrender.com").rstrip("/")
+
+_PLAYBOOK = {
+    "name": "TVibe Signal — Agent Playbook",
+    "version": VERSION,
+    "nfa": True,
+    "principle": "Measure outcomes. Never treat a verdict as a guarantee. Never auto-edit risk rules.",
+    "base": _BASE,
+    "steps": [
+        {
+            "id": 1,
+            "name": "discover",
+            "do": "GET /.well-known/agent-card.json and GET /llms.txt once per session",
+            "urls": [f"{_BASE}/.well-known/agent-card.json", f"{_BASE}/llms.txt"],
+        },
+        {
+            "id": 2,
+            "name": "screen",
+            "do": "GET /omni?mint=<MINT>&view=agent",
+            "url_template": f"{_BASE}/omni?mint={{mint}}&view=agent",
+            "read": ["action", "filter.pass", "blockers", "unknowns", "confidence", "wallet_intel.flags"],
+        },
+        {
+            "id": 3,
+            "name": "branch",
+            "rules": [
+                {"if": "action == skip OR filter.pass == false OR blockers non-empty", "then": "Do not size a buy. Report blockers."},
+                {"if": "unknowns non-empty", "then": "Call check_exit (MCP) or GET /exit?mint= before any size; lower confidence."},
+                {"if": "wallet_intel.flags non-empty", "then": "Treat as research shadow only; prefer review, not pass."},
+                {"if": "action == pass AND unknowns empty", "then": "Still not advice — optional light size only under user policy."},
+            ],
+        },
+        {
+            "id": 4,
+            "name": "exit_cost",
+            "do": "If considering a position: MCP check_exit or GET /exit?mint=",
+            "url_template": f"{_BASE}/exit?mint={{mint}}",
+        },
+        {
+            "id": 5,
+            "name": "calibrate",
+            "do": "GET /stats periodically (not every mint) to see measured avoid/ok outcomes",
+            "url": f"{_BASE}/stats",
+        },
+        {
+            "id": 6,
+            "name": "rate_limits",
+            "do": "On HTTP 429/503 honor Retry-After. Prefer one /omni over many tiny calls. Batch <= 10.",
+        },
+        {
+            "id": 7,
+            "name": "forbidden",
+            "do": [
+                "Do not invent filter.pass or clear unknowns",
+                "Do not claim financial advice",
+                "Do not modify TVibe heuristics, thresholds, or deploy code",
+                "Do not ignore shadow flags as proven rugs without /stats support",
+            ],
+        },
+    ],
+    "mcp": {
+        "url": f"{_BASE}/mcp",
+        "tools_preferred": [
+            "check_token_risk",
+            "check_tokens_batch",
+            "check_exit",
+            "get_track_record",
+        ],
+    },
+    "prompt_stub": (
+        "You are a risk gate, not a tipster. For each Solana mint: "
+        "1) GET /omni?mint=...&view=agent. "
+        "2) If action is skip or filter.pass is false, stop. "
+        "3) If unknowns is non-empty, run check_exit before any size. "
+        "4) Report action, blockers, unknowns, confidence. "
+        "5) Never present verdicts as guarantees. Not financial advice."
+    ),
+}
+
+
+@app.get("/agent/playbook", tags=["product"], summary="Fixed workflow for AI agents (no code mutation)")
+@app.get("/playbook", include_in_schema=False)
+async def agent_playbook_json():
+    return JSONResponse(_PLAYBOOK)
+
+
+@app.get("/agent/playbook.txt", include_in_schema=False)
+async def agent_playbook_txt():
+    lines = [
+        f"# {_PLAYBOOK['name']} v{_PLAYBOOK['version']}",
+        f"# NFA={_PLAYBOOK['nfa']}",
+        f"# {_PLAYBOOK['principle']}",
+        f"BASE={_BASE}",
+        "",
+        "PROMPT_STUB:",
+        _PLAYBOOK["prompt_stub"],
+        "",
+        "STEPS:",
+    ]
+    for s in _PLAYBOOK["steps"]:
+        lines.append(f"{s['id']}. {s['name']}: {s.get('do') or s.get('rules') or ''}")
+    lines += ["", f"MCP={_PLAYBOOK['mcp']['url']}", f"CARD={_BASE}/.well-known/agent-card.json"]
+    return PlainTextResponse("\n".join(lines) + "\n")
+
+
+# Point agent-card skill at playbook if card dict exists
+try:
+    card = globals().get("_AGENT_CARD")
+    if isinstance(card, dict):
+        card["version"] = VERSION
+        skills = card.setdefault("skills", [])
+        if not any(s.get("id") == "playbook" for s in skills if isinstance(s, dict)):
+            skills.append({
+                "id": "playbook",
+                "name": "Agent playbook",
+                "description": "GET /agent/playbook — fixed steps: view=agent → exit if unknowns → /stats. No code edits.",
+                "tags": ["agent", "workflow"],
+                "examples": ["Load playbook once, then screen mints"],
+            })
+        eps = card.setdefault("endpoints", {})
+        eps["playbook"] = "GET /agent/playbook"
+except Exception as _e:
+    print("[part139] card patch:", str(_e)[:80])
+
+print("[part139] v%s /agent/playbook (+ .txt) fixed agent workflow" % VERSION)
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
