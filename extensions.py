@@ -7985,6 +7985,352 @@ print(
 )
 
 
+
+# --- part142: agent-runtime (standardized errors + AI-ready view + screen_hot) ---
+# P0: machine-readable errors, richer view=agent. P1: limited hot screen (not full-market oracle).
+# Capital/traffic later improves stats; this improves agent wiring now.
+
+VERSION = "3.0.12"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+import os
+import time
+from typing import Any, Dict, List, Optional
+
+# ---------- standardized agent errors ----------
+# Codes are stable for agent switch/case. retryable => honor retry_after_s.
+
+AGENT_ERROR_CODES = {
+    "MINT_INVALID": {"retryable": False, "agent_action": "abort"},
+    "RATE_LIMIT": {"retryable": True, "agent_action": "backoff"},
+    "UPSTREAM_RATE_LIMIT": {"retryable": True, "agent_action": "backoff"},
+    "UPSTREAM_DOWN": {"retryable": True, "agent_action": "backoff"},
+    "OVERLOAD": {"retryable": True, "agent_action": "backoff"},
+    "EXIT_UNAVAILABLE": {"retryable": True, "agent_action": "reduce_or_skip"},
+    "DATA_PARTIAL": {"retryable": False, "agent_action": "lower_confidence"},
+    "REDIS_DOWN": {"retryable": True, "agent_action": "continue_degraded"},
+    "INTERNAL": {"retryable": True, "agent_action": "backoff"},
+}
+
+
+def agent_error(
+    code: str,
+    message: str = "",
+    *,
+    retry_after_s: Optional[int] = None,
+    http: int = 400,
+    extra: Optional[dict] = None,
+) -> dict:
+    meta = AGENT_ERROR_CODES.get(code) or {"retryable": False, "agent_action": "abort"}
+    body = {
+        "ok": False,
+        "error": {
+            "code": code,
+            "message": (message or code)[:240],
+            "retryable": bool(meta.get("retryable")),
+            "agent_action": meta.get("agent_action") or "abort",
+            "retry_after_s": retry_after_s,
+        },
+        "nfa": True,
+        "rules_version": globals().get("RULES_VERSION"),
+        "version": VERSION,
+    }
+    if extra and isinstance(extra, dict):
+        body["error"]["detail"] = extra
+    body["_http"] = http  # stripped by responders if needed
+    return body
+
+
+def _data_quality_from_pkt(pkt: dict) -> dict:
+    unknowns = []
+    dec = pkt.get("decision") if isinstance(pkt.get("decision"), dict) else {}
+    unknowns = list(dec.get("unknowns") or pkt.get("unknowns") or [])
+    partial = bool(pkt.get("partial")) or any("Gecko" in str(u) or "rate-limit" in str(u).lower() or "unverified" in str(u).lower() for u in unknowns)
+    freshness = "stale" if pkt.get("stale") or pkt.get("served_stale") else "live"
+    completeness = "partial" if partial or unknowns else "ok"
+    return {
+        "completeness": completeness,
+        "freshness": freshness,
+        "unknown_count": len(unknowns),
+        "notes": unknowns[:4],
+    }
+
+
+def _sizing_hint(action: str, confidence: str, dq: dict) -> str:
+    # Policy hints only — not advice. Agents map to their own risk budget.
+    if action == "skip":
+        return "zero"
+    if dq.get("completeness") == "partial" or confidence == "low":
+        return "tiny_or_skip"
+    if action == "review":
+        return "tiny_or_skip"
+    if action == "pass" and confidence == "medium":
+        return "normal_under_user_policy"
+    return "tiny_or_skip"
+
+
+def _enrich_agent_view(out: dict, pkt: dict = None) -> dict:
+    if not isinstance(out, dict):
+        return out
+    if out.get("ok") is False and out.get("error"):
+        return out
+    pkt = pkt if isinstance(pkt, dict) else {}
+    dq = _data_quality_from_pkt(pkt if pkt else out)
+    out["data_quality"] = dq
+    action = out.get("action") or "review"
+    conf = out.get("confidence") or "low"
+    out["sizing_hint"] = _sizing_hint(str(action), str(conf), dq)
+    # machine agent_action for happy path
+    if action == "skip":
+        out["agent_action"] = "abort_buy"
+    elif action == "review" or dq.get("completeness") == "partial":
+        out["agent_action"] = "review_then_exit_check"
+    else:
+        out["agent_action"] = "optional_size_under_policy"
+    # risk as 0-1 helper for models that prefer probability-like scale (still heuristic!)
+    rs = out.get("risk_score")
+    try:
+        if rs is not None:
+            out["risk_score_01"] = round(min(1.0, max(0.0, float(rs) / 100.0)), 4)
+    except Exception:
+        pass
+    out["ok"] = True
+    out.setdefault("nfa", True)
+    out.setdefault("rules_version", globals().get("RULES_VERSION"))
+    return out
+
+
+# Wrap existing agent view
+_av_rt = globals().get("_tvibe_agent_view")
+if callable(_av_rt):
+    def _tvibe_agent_view(pkt: dict) -> dict:
+        if isinstance(pkt, dict) and pkt.get("error") and not pkt.get("decision"):
+            # signal-level failure
+            return agent_error(
+                "INTERNAL",
+                str(pkt.get("error"))[:200],
+                retryable=True,
+                http=503,
+            )
+        out = _av_rt(pkt)
+        return _enrich_agent_view(out if isinstance(out, dict) else {}, pkt if isinstance(pkt, dict) else {})
+
+
+# ---------- screen_hot: boost list + light filters + omni (capped) ----------
+_SCREEN_CACHE: dict = {"ts": 0.0, "mints": []}
+_SCREEN_CACHE_S = 60
+
+
+async def _fetch_boost_mints(client, limit: int = 30) -> List[str]:
+    now = time.time()
+    if _SCREEN_CACHE["mints"] and now - _SCREEN_CACHE["ts"] < _SCREEN_CACHE_S:
+        return list(_SCREEN_CACHE["mints"])[:limit]
+    mints: List[str] = []
+    try:
+        r = await client.get("https://api.dexscreener.com/token-boosts/top/v1", timeout=12.0)
+        if r.status_code == 200:
+            data = r.json()
+            for x in (data if isinstance(data, list) else []):
+                if not isinstance(x, dict):
+                    continue
+                if str(x.get("chainId") or "").lower() != "solana":
+                    continue
+                m = x.get("tokenAddress")
+                if m and m not in mints:
+                    mints.append(m)
+                if len(mints) >= limit:
+                    break
+    except Exception:
+        pass
+    if mints:
+        _SCREEN_CACHE["ts"] = now
+        _SCREEN_CACHE["mints"] = mints
+    return mints[:limit]
+
+
+async def screen_hot(
+    client,
+    *,
+    min_liq: float = 50000,
+    max_age_minutes: Optional[float] = None,
+    max_risk: float = 40,
+    top: int = 3,
+    require_pass: bool = False,
+) -> dict:
+    """Limited screener: Dex boosts → filter → omni. Not a full-chain scanner."""
+    top = max(1, min(int(top or 3), 5))  # hard cap free-tier
+    min_liq = float(min_liq or 0)
+    max_risk = float(max_risk if max_risk is not None else 100)
+    candidates = await _fetch_boost_mints(client, limit=25)
+    if not candidates:
+        return {
+            "ok": True,
+            "items": [],
+            "skipped": [],
+            "note": "No boost mints available (upstream empty or rate-limited).",
+            "nfa": True,
+            "rules_version": globals().get("RULES_VERSION"),
+        }
+    items = []
+    skipped = []
+    # score a few more than top then cut
+    budget = min(len(candidates), max(top * 3, 6), 12)
+    for mint in candidates[:budget]:
+        try:
+            pkt = await build_omni(client, mint)
+            if not isinstance(pkt, dict):
+                skipped.append({"mint": mint, "reason": "bad_packet"})
+                continue
+            if pkt.get("error") and not pkt.get("decision"):
+                skipped.append({"mint": mint, "reason": "signal_error", "detail": str(pkt.get("error"))[:80]})
+                continue
+            liq = pkt.get("liquidity_usd")
+            try:
+                liq_f = float(liq) if liq is not None else None
+            except Exception:
+                liq_f = None
+            if min_liq and (liq_f is None or liq_f < min_liq):
+                skipped.append({"mint": mint, "reason": "low_liq", "liquidity_usd": liq_f})
+                continue
+            age = pkt.get("pair_age_minutes")
+            try:
+                age_f = float(age) if age is not None else None
+            except Exception:
+                age_f = None
+            if max_age_minutes is not None and age_f is not None and age_f > float(max_age_minutes):
+                skipped.append({"mint": mint, "reason": "too_old", "pair_age_minutes": age_f})
+                continue
+            av = _tvibe_agent_view(pkt) if callable(globals().get("_tvibe_agent_view")) else {}
+            if not isinstance(av, dict):
+                av = {}
+            rs = av.get("risk_score")
+            try:
+                rs_f = float(rs) if rs is not None else 999.0
+            except Exception:
+                rs_f = 999.0
+            if rs_f > max_risk:
+                skipped.append({"mint": mint, "reason": "max_risk", "risk_score": rs_f})
+                continue
+            if require_pass and not (av.get("filter") or {}).get("pass"):
+                skipped.append({"mint": mint, "reason": "filter_fail"})
+                continue
+            items.append({
+                "mint": mint,
+                "action": av.get("action"),
+                "verdict": av.get("verdict"),
+                "filter": av.get("filter"),
+                "risk_score": av.get("risk_score"),
+                "risk_score_01": av.get("risk_score_01"),
+                "confidence": av.get("confidence"),
+                "sizing_hint": av.get("sizing_hint"),
+                "agent_action": av.get("agent_action"),
+                "data_quality": av.get("data_quality"),
+                "liquidity_usd": liq_f,
+                "pair_age_minutes": age_f,
+            })
+        except Exception as e:
+            skipped.append({"mint": mint, "reason": "exception", "detail": str(e)[:80]})
+        if len(items) >= top:
+            break
+    # safest first
+    items.sort(key=lambda x: (x.get("risk_score") is None, x.get("risk_score") or 999))
+    return {
+        "ok": True,
+        "items": items[:top],
+        "skipped_count": len(skipped),
+        "skipped": skipped[:15],
+        "params": {
+            "min_liq": min_liq,
+            "max_age_minutes": max_age_minutes,
+            "max_risk": max_risk,
+            "top": top,
+            "require_pass": require_pass,
+        },
+        "limitation": "Boost/trending shortlist only — not every new Solana mint.",
+        "nfa": True,
+        "rules_version": globals().get("RULES_VERSION"),
+        "version": VERSION,
+    }
+
+
+from fastapi import Query
+from fastapi.responses import JSONResponse
+
+
+@app.get("/screen/hot", tags=["product"], summary="Limited hot screen for agents (boost list + filters)")
+async def screen_hot_endpoint(
+    request: Request,
+    min_liq: float = Query(50000, ge=0, description="Min liquidity USD"),
+    max_age_minutes: Optional[float] = Query(None, ge=0, description="Max pair age in minutes"),
+    max_risk: float = Query(40, ge=0, le=100),
+    top: int = Query(3, ge=1, le=5),
+    require_pass: bool = Query(False),
+):
+    wait = rate_limited(client_ip(request), cost=6)
+    if wait:
+        body = agent_error("RATE_LIMIT", f"Retry in {wait}s", retry_after_s=int(wait), http=429)
+        return JSONResponse(body, status_code=429)
+    client = request.app.state.client
+    return await screen_hot(
+        client,
+        min_liq=min_liq,
+        max_age_minutes=max_age_minutes,
+        max_risk=max_risk,
+        top=top,
+        require_pass=require_pass,
+    )
+
+
+# Patch omni agent endpoint errors to standard shape when rate-limited
+# (existing HTTPException path remains; clients can still read detail)
+
+# Update playbook + card
+try:
+    pb = globals().get("_PLAYBOOK")
+    if isinstance(pb, dict):
+        pb["version"] = VERSION
+        pb.setdefault("endpoints", {})
+        if isinstance(pb.get("steps"), list):
+            pass
+        pb["screen_hot"] = "GET /screen/hot?min_liq=50000&max_risk=40&top=3"
+        mcp = pb.get("mcp") if isinstance(pb.get("mcp"), dict) else {}
+        tools = list(mcp.get("tools_preferred") or [])
+        if "screen_hot" not in tools:
+            tools.append("screen_hot")
+        mcp["tools_preferred"] = tools
+        pb["mcp"] = mcp
+except Exception as e:
+    print("[part142] playbook:", str(e)[:80])
+
+try:
+    card = globals().get("_AGENT_CARD")
+    if isinstance(card, dict):
+        card["version"] = VERSION
+        skills = card.setdefault("skills", [])
+        if not any(isinstance(s, dict) and s.get("id") == "screen_hot" for s in skills):
+            skills.append({
+                "id": "screen_hot",
+                "name": "Screen hot boosts",
+                "description": "GET /screen/hot — filter boost mints by liq/risk (capped). Not full-market discovery.",
+                "tags": ["screen", "agent"],
+                "examples": ["Find up to 3 boost tokens with liq>=50k and risk_score<=40"],
+            })
+        eps = card.setdefault("endpoints", {})
+        eps["screen_hot"] = "GET /screen/hot"
+except Exception as e:
+    print("[part142] card:", str(e)[:80])
+
+# Expose for MCP part7 injection
+globals()["_SCREEN_HOT_FN"] = screen_hot
+globals()["_AGENT_ERROR_FN"] = agent_error
+
+print("[part142] v%s agent-runtime: errors + agent enrich + GET /screen/hot" % VERSION)
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
@@ -8007,12 +8353,13 @@ except Exception:  # noqa: BLE001
     ToolAnnotations = None  # type: ignore[assignment,misc]
 
 MCP_INSTRUCTIONS = (
-    "Solana token data and risk checks (heuristics, not financial advice). Recommended workflow: "
-    "1) check_tokens_batch for a watchlist (ranked, safest first; use min_liq or max_age_minutes to skip junk early) or check_token_risk for one token; "
-    "2) if the verdict is not 'avoid', call check_exit to see what selling would cost; "
-    "3) call get_track_record once to learn how reliable past verdicts were. "
-    "Always read data_quality: if completeness is 'partial' or freshness is 'stale', say so and lower your confidence. "
-    "Never present a verdict as a guarantee."
+    "Solana token risk heuristics for agents (not financial advice). Workflow: "
+    "0) optional screen_hot for a small boost shortlist (liq/risk filters; not full-market); "
+    "1) check_token_risk or check_tokens_batch; prefer view fields action/filter.pass/risk_score/data_quality/sizing_hint; "
+    "2) if action is not skip, call check_exit before sizing; "
+    "3) get_track_record occasionally. "
+    "On errors read error.code (RATE_LIMIT, UPSTREAM_RATE_LIMIT, MINT_INVALID, …) and error.retryable. "
+    "Never present verdicts as guarantees. Honor unknowns → lower confidence."
 )
 
 
@@ -8121,6 +8468,34 @@ def _setup_mcp():
         """How often were this service's verdicts right? Measured outcomes about 24h after each verdict, per verdict
         and per flag, with recent examples and caveats. Rates stay null until enough samples exist."""
         return await stats_report(app.state.client)
+
+    @tool("Screen hot boosts (limited)")
+    async def screen_hot(
+        ctx: Context,
+        min_liq: float = 50000,
+        max_age_minutes: Optional[float] = None,
+        max_risk: float = 40,
+        top: int = 3,
+        require_pass: bool = False,
+    ) -> dict:
+        """Shortlist hot Solana boosts, filter by liquidity/age/risk, return up to `top` (max 5) agent views.
+        NOT a full-chain scanner of every new mint. Use for discovery, then check_exit before any size.
+        min_liq USD, max_risk 0-100 (lower is safer), require_pass keeps filter.pass only."""
+        _rl(_mcp_key(ctx), cost=6)
+        fn = globals().get("_SCREEN_HOT_FN") or globals().get("screen_hot")
+        if not callable(fn):
+            raise ToolError("screen_hot not loaded")
+        try:
+            return await fn(
+                app.state.client,
+                min_liq=min_liq,
+                max_age_minutes=max_age_minutes,
+                max_risk=max_risk,
+                top=top,
+                require_pass=require_pass,
+            )
+        except HTTPException as e:
+            raise ToolError(f"{e.detail} (HTTP {e.status_code})")
 
     return srv
 
