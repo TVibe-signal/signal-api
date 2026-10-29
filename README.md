@@ -1,37 +1,16 @@
-# TVibe Signal
+# TVibe Signal docs
 
-Solana token **risk signals** for **AI agents**. Heuristics, measured in public. **Not financial advice.**
+Open-source, free Solana token **risk filter** for agents and humans.
 
-Free public instance · open source · self-host anytime.
+| Doc | Purpose |
+|-----|---------|
+| [AGENTS.md](./AGENTS.md) | How agents should call the API / MCP |
+| [DATA_FEEDER.md](./DATA_FEEDER.md) | **Ops only** — prompts to nurture track-record (NFA) |
+| [OPS.md](./OPS.md) | Cron, env, free-tier limits |
 
-| | |
-|---|---|
-| **Public API** | https://signal-api-24q4.onrender.com |
-| **Repo** | https://github.com/TVibe-signal/signal-api |
-| **X** | https://x.com/realTVibe |
-| **Telegram bot** | https://t.me/Gotvibesolbot |
+**Not financial advice.** Verdicts are heuristics with measured track record on `/stats`, not guarantees.
 
-Market data: DexScreener / GeckoTerminal · On-chain: Solana RPC · LP: RugCheck · Exit quotes: Jupiter.
-
----
-
-## For agents (start here)
-
-| Use | Value |
-|-----|--------|
-| **Primary HTTP** | `GET /omni?mint=<MINT>` |
-| **Gate** | `filter.pass` + `decision.verdict` |
-| **Policies** | `default` · `strict` · `research` (`?policy=` or see `/filter/policies`) |
-| **MCP** | `https://signal-api-24q4.onrender.com/mcp` |
-| **MCP tool** | `omni(mint)` |
-| **Machine docs** | https://signal-api-24q4.onrender.com/llms.txt |
-| **Agent page** | https://signal-api-24q4.onrender.com/agents |
-| **Reliability / fair use** | `/agents/reliability` · `/pricing` |
-| **Accuracy** | `/stats` |
-| **Rule candidates** | `/stats/rule-candidates` |
-| **Walk-forward (no auto-promote)** | `/filter/walk-forward` |
-| **Pattern benchmark** | `/benchmark/prerug` |
-
-```bash
-curl -sS "https://signal-api-24q4.onrender.com/omni?mint=So11111111111111111111111111111111111111112" \
-  | jq '{verdict: .decision.verdict, filter: .filter, risk: .decision.risk_score}'
+- Live: https://signal-api-24q4.onrender.com  
+- GitHub: https://github.com/TVibe-signal/signal-api  
+- X: https://x.com/realTVibe  
+- Telegram bot: https://t.me/Gotvibesolbot  
