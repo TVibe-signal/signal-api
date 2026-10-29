@@ -7855,6 +7855,136 @@ if callable(_stats_prev):
 print("[part140] v%s rules_version=%s on omni/signal/agent + GET /rules" % (VERSION, RULES_VERSION))
 
 
+
+# --- part141: free-tier cache policy (verdict TTL + seed caps + public table) ---
+# Read-path TTL by verdict (in-memory cache_get). Avoid stays hot longer = fewer Dex/RPC repeats.
+# Env overrides keep Render free safe without code edits next time.
+
+VERSION = "3.0.11"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+import os
+import time
+
+# --- seed: prefer explicit env; else free-tier-friendly defaults ---
+try:
+    if os.getenv("SEED_INTERVAL_S"):
+        SEED_INTERVAL_S = max(180, int(os.getenv("SEED_INTERVAL_S")))
+    else:
+        SEED_INTERVAL_S = max(int(globals().get("SEED_INTERVAL_S") or 900), 900)  # >= 15 min
+    if os.getenv("SEED_MAX_PER_DAY"):
+        SEED_MAX_PER_DAY = max(5, int(os.getenv("SEED_MAX_PER_DAY")))
+    else:
+        # Cap aggressive earlier overrides (80/120) back to free-safe unless user sets env
+        SEED_MAX_PER_DAY = min(int(globals().get("SEED_MAX_PER_DAY") or 40), 40)
+    if os.getenv("SEED_TRAFFIC"):
+        SEED_ENABLED = os.getenv("SEED_TRAFFIC").lower() in ("1", "true", "yes")
+except Exception as e:
+    print("[part141] seed tune:", str(e)[:80])
+
+# --- verdict-aware memory TTL (seconds) ---
+_TTL_OK = max(15, int(os.getenv("CACHE_TTL_OK", "30")))
+_TTL_CAUTION = max(30, int(os.getenv("CACHE_TTL_CAUTION", "90")))
+_TTL_AVOID = max(300, int(os.getenv("CACHE_TTL_AVOID", "3600")))  # 1h default free; set 86400 if want day-long
+_TTL_DEFAULT = max(30, int(os.getenv("CACHE_TTL", str(globals().get("CACHE_TTL") or 30))))
+
+
+def _ttl_for_payload(data: dict) -> int:
+    if not isinstance(data, dict):
+        return _TTL_DEFAULT
+    v = None
+    dec = data.get("decision")
+    if isinstance(dec, dict):
+        v = dec.get("verdict")
+    v = (v or data.get("verdict") or "").lower() if isinstance(v or data.get("verdict"), str) else ""
+    if v == "ok":
+        return _TTL_OK
+    if v == "avoid":
+        return _TTL_AVOID
+    if v == "caution":
+        return _TTL_CAUTION
+    # filter.pass false ~ treat like caution+
+    f = data.get("filter")
+    if isinstance(f, dict) and f.get("pass") is False:
+        return max(_TTL_CAUTION, 120)
+    return _TTL_DEFAULT
+
+
+# Patch cache_get if present (core in-memory)
+_cg_prev = globals().get("cache_get")
+if callable(_cg_prev):
+    def cache_get(key: str, ttl: int = None):
+        if ttl is None:
+            # peek age+data without dropping
+            peek = globals().get("cache_peek")
+            if callable(peek):
+                hit = peek(key)
+                if not hit:
+                    return None
+                age, data = hit
+                lim = _ttl_for_payload(data) if isinstance(data, dict) else _TTL_DEFAULT
+                return data if age <= lim else None
+            return _cg_prev(key, _TTL_DEFAULT)
+        return _cg_prev(key, ttl)
+
+_CACHE_POLICY = {
+    "version": VERSION,
+    "memory_cache_ttl_s": {
+        "ok": _TTL_OK,
+        "caution": _TTL_CAUTION,
+        "avoid": _TTL_AVOID,
+        "default": _TTL_DEFAULT,
+        "security_holders": int(globals().get("SEC_CACHE_TTL") or 120),
+        "exit_quote": int(globals().get("EXIT_CACHE_TTL") or 60),
+        "stale_serve_max": int(globals().get("STALE_MAX") or 600),
+    },
+    "seed": {
+        "enabled": bool(globals().get("SEED_ENABLED", True)),
+        "interval_s": int(globals().get("SEED_INTERVAL_S") or SEED_INTERVAL_S),
+        "max_per_day": int(globals().get("SEED_MAX_PER_DAY") or SEED_MAX_PER_DAY),
+        "note": "Seed pulls boost/profile mints into track-record; keep low on free Upstash/Dex",
+    },
+    "redis_long_ttl_s": {
+        "snapshot": 90 * 24 * 3600,
+        "holder_cache": 8 * 3600,
+        "community": 7 * 24 * 3600,
+        "wallet_intel_mem": 45,
+    },
+    "free_tier_hints": {
+        "cron": "GET /ping or /health every 5-10 min, save response OFF",
+        "avoid_cron_omni": True,
+        "manual_hot_mints_per_day": "30-80 distinct",
+        "env": [
+            "SEED_MAX_PER_DAY=40",
+            "SEED_INTERVAL_S=900",
+            "CACHE_TTL_AVOID=3600",
+            "SEED_TRAFFIC=true",
+        ],
+    },
+}
+
+
+@app.get("/ops/cache-policy", tags=["ops"], include_in_schema=False)
+async def ops_cache_policy():
+    # live numbers
+    pol = dict(_CACHE_POLICY)
+    pol["seed"]["enabled"] = bool(globals().get("SEED_ENABLED", pol["seed"]["enabled"]))
+    pol["seed"]["interval_s"] = int(globals().get("SEED_INTERVAL_S") or pol["seed"]["interval_s"])
+    pol["seed"]["max_per_day"] = int(globals().get("SEED_MAX_PER_DAY") or pol["seed"]["max_per_day"])
+    pol["memory_cache_ttl_s"]["stale_serve_max"] = int(globals().get("STALE_MAX") or 600)
+    pol["rules_version"] = globals().get("RULES_VERSION")
+    return pol
+
+print(
+    "[part141] v%s cache ok=%ss caution=%ss avoid=%ss | seed interval=%ss max/day=%s"
+    % (VERSION, _TTL_OK, _TTL_CAUTION, _TTL_AVOID, globals().get("SEED_INTERVAL_S"), globals().get("SEED_MAX_PER_DAY"))
+)
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
