@@ -1,7 +1,8 @@
-## Docs
+## Client examples
 
-- [docs/AGENTS.md](docs/AGENTS.md) — agent / MCP usage  
-- [docs/OPS.md](docs/OPS.md) — cron & free-tier ops  
-- [docs/DATA_FEEDER.md](docs/DATA_FEEDER.md) — **data-nurture prompts only (NFA, not signals)**  
+Optional scripts that run **on your machine** (not on the API server):
 
-Machine docs: https://signal-api-24q4.onrender.com/llms.txt
+- [`examples/gate.py`](examples/gate.py) — fail-closed `safe_to_buy(mint)` policy helper around `/omni?view=agent` + `/exit`
+- [`examples/warmer.py`](examples/warmer.py) — warm watchlist, CSV log, optional Telegram on verdict change
+
+See [`examples/README.md`](examples/README.md). **NFA** — heuristics, not financial advice. Be gentle on the public free instance (`EVERY_S>=900`).

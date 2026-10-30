@@ -1,16 +1,46 @@
-# TVibe Signal docs
+# TVibe client examples (not server code)
 
-Open-source, free Solana token **risk filter** for agents and humans.
+These scripts run **on your machine / bot host**. Do **not** put them inside the Render `signal-api` process.
 
-| Doc | Purpose |
-|-----|---------|
-| [AGENTS.md](./AGENTS.md) | How agents should call the API / MCP |
-| [DATA_FEEDER.md](./DATA_FEEDER.md) | **Ops only** — prompts to nurture track-record (NFA) |
-| [OPS.md](./OPS.md) | Cron, env, free-tier limits |
+| File | Role |
+|------|------|
+| `gate.py` | `safe_to_buy(mint) -> (ok, reason)` fail-closed policy helper |
+| `warmer.py` | Warm `/omni`, CSV log, optional Telegram on verdict change |
 
-**Not financial advice.** Verdicts are heuristics with measured track record on `/stats`, not guarantees.
+**NFA.** TVibe is a heuristic risk API. `safe_to_buy` is *your* policy on top of it — not a guarantee.
 
-- Live: https://signal-api-24q4.onrender.com  
-- GitHub: https://github.com/TVibe-signal/signal-api  
-- X: https://x.com/realTVibe  
-- Telegram bot: https://t.me/Gotvibesolbot  
+## Install
+
+```bash
+pip install httpx
+```
+
+## gate.py
+
+```bash
+export API_BASE=https://signal-api-24q4.onrender.com
+export MAX_RISK=30
+export MIN_LIQ=50000
+export MAX_LOSS_PCT=5
+python gate.py <MINT>
+```
+
+Uses `GET /omni?view=agent` then optional `GET /exit`. Requires `filter.pass` when `REQUIRE_PASS=1`.
+
+## warmer.py
+
+```bash
+export WATCH_MINTS=mint1,mint2
+# or mints.txt
+export EVERY_S=900   # 15 min — be kind on free tier (avoid 180)
+export GAP_S=4
+export ONCE=1        # one pass
+python warmer.py
+```
+
+Optional: `TG_TOKEN`, `TG_CHAT` for verdict-change alerts.
+
+## Fair use
+
+- Prefer self-host API for tight loops
+- Public instance: few mints, `EVERY_S>=900`, respect 429
