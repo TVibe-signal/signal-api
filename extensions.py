@@ -8331,6 +8331,159 @@ globals()["_AGENT_ERROR_FN"] = agent_error
 print("[part142] v%s agent-runtime: errors + agent enrich + GET /screen/hot" % VERSION)
 
 
+
+# --- part143: authority + LP agent surface + soft bundle caution (no gRPC) ---
+# Hard VETO only for clear authorities when already avoid/blockers.
+# Bundle/serial remain shadow: force review (never silent pass). Escalate VETO only via WI_ESCALATE later.
+
+VERSION = "3.0.13"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+import os
+
+_WI_SOFT = os.getenv("WI_SOFT_REVIEW", "1").lower() in ("1", "true", "yes")
+# Optional hard skip when serial/bundle present — default OFF until stats support it
+_WI_HARD = os.getenv("WI_ESCALATE", "0").lower() in ("1", "true", "yes")
+
+
+def _sec_blob(pkt: dict) -> dict:
+    for k in ("security", "sec", "token_security"):
+        v = pkt.get(k)
+        if isinstance(v, dict):
+            return v
+    dec = pkt.get("decision") if isinstance(pkt.get("decision"), dict) else {}
+    v = dec.get("security")
+    return v if isinstance(v, dict) else {}
+
+
+def _authority_lp_notes(pkt: dict):
+    """Return (blockers, cautions, unknowns) extra lines for agent view."""
+    blockers, cautions, unknowns = [], [], []
+    sec = _sec_blob(pkt)
+    # Authorities
+    ma_rev = sec.get("mint_authority_revoked")
+    fa_rev = sec.get("freeze_authority_revoked")
+    if ma_rev is False:
+        blockers.append("Mint authority still active — supply can be inflated")
+    elif ma_rev is None and sec:
+        unknowns.append("Mint authority status unverified")
+    if fa_rev is False:
+        blockers.append("Freeze authority still active — accounts can be frozen")
+    elif fa_rev is None and sec:
+        unknowns.append("Freeze authority status unverified")
+
+    # LP lock / burn signals (best-effort field names)
+    lp = sec.get("lp_locked_pct")
+    if lp is None:
+        lp = pkt.get("lp_locked_pct")
+    try:
+        lp_f = float(lp) if lp is not None else None
+    except (TypeError, ValueError):
+        lp_f = None
+    if lp_f is not None:
+        if lp_f < 50:
+            cautions.append(f"LP locked/burned only ~{lp_f:.0f}%")
+        elif lp_f < 90:
+            cautions.append(f"LP partially locked (~{lp_f:.0f}%)")
+    else:
+        # common omni unknowns already mention LP; add only if security present but silent
+        flags = list(sec.get("flags") or pkt.get("flags") or [])
+        if "lp_not_locked" in flags or "lp_unlocked" in flags:
+            cautions.append("LP not meaningfully locked or burned")
+        elif "lp_partially_locked" in flags:
+            cautions.append("LP only partially locked")
+
+    return blockers, cautions, unknowns
+
+
+_av143 = globals().get("_tvibe_agent_view")
+if callable(_av143):
+    def _tvibe_agent_view(pkt: dict) -> dict:
+        out = _av143(pkt)
+        if not isinstance(out, dict) or out.get("ok") is False:
+            return out
+        if not isinstance(pkt, dict):
+            return out
+        try:
+            b2, c2, u2 = _authority_lp_notes(pkt)
+            blockers = list(out.get("blockers") or [])
+            cautions = list(out.get("cautions") or [])
+            unknowns = list(out.get("unknowns") or [])
+            for x in b2:
+                if x not in blockers:
+                    blockers.append(x)
+            for x in c2:
+                if x not in cautions:
+                    cautions.append(x)
+            for x in u2:
+                if x not in unknowns:
+                    unknowns.append(x)
+
+            # wallet_intel soft / hard
+            wi = out.get("wallet_intel") if isinstance(out.get("wallet_intel"), dict) else {}
+            flags = [str(f).lower() for f in (wi.get("flags") or [])]
+            bundle_hit = any(
+                f in flags or "bundle" in f or "serial" in f for f in flags
+            ) or any(x in flags for x in ("serial_deployer", "bundle", "bundled", "funding_cluster"))
+
+            action = out.get("action")
+            if bundle_hit and flags:
+                msg = "wallet_intel shadow: " + ",".join(list(wi.get("flags") or [])[:4])
+                if _WI_HARD:
+                    if msg not in blockers:
+                        blockers.append(msg + " (escalate)")
+                    action = "skip"
+                    out["filter"] = {"pass": False}
+                    out["verdict"] = out.get("verdict") if out.get("verdict") == "avoid" else "avoid"
+                elif _WI_SOFT and action == "pass":
+                    action = "review"
+                    if msg not in cautions:
+                        cautions.append(msg + " — prefer review, not pass")
+                    # do not flip filter.pass alone; decision stack stays source of truth
+
+            # Authority blockers force skip
+            if any("Mint authority still active" in x or "Freeze authority still active" in x for x in blockers):
+                action = "skip"
+                out["filter"] = {"pass": False}
+                if out.get("verdict") != "avoid":
+                    # keep avoid-or-stronger messaging for agents
+                    out["verdict"] = "avoid"
+                out["agent_action"] = "abort_buy"
+
+            out["blockers"] = blockers[:8]
+            out["cautions"] = cautions[:8]
+            out["unknowns"] = unknowns[:8]
+            out["action"] = action
+            if unknowns and out.get("confidence") == "medium" and action == "pass":
+                out["confidence"] = "low"
+            # tag layer for agents
+            out["defense_layers"] = {
+                "authority_lp": True,
+                "wallet_intel": "hard" if _WI_HARD else ("soft_review" if _WI_SOFT else "shadow_only"),
+                "realtime_grpc": False,
+                "note": "No gRPC ms cancel — use your execution bot after this gate.",
+            }
+            out["version"] = VERSION
+        except Exception:
+            pass
+        return out
+
+# rules changelog note
+try:
+    RULES_VERSION = globals().get("RULES_VERSION") or "2026.10.28.a"
+except Exception:
+    pass
+
+print(
+    "[part143] v%s authority/LP agent surface · WI_SOFT_REVIEW=%s WI_ESCALATE=%s"
+    % (VERSION, _WI_SOFT, _WI_HARD)
+)
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
