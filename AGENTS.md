@@ -1,49 +1,33 @@
-# TVibe Signal — For AI agents
+# For AI agents — TVibe Signal
 
-**NFA.** Heuristic risk filter for Solana mints — not financial advice.
+**Not financial advice.** Heuristic risk gate for Solana mints.
 
-## Quick start
+## Quick path
 
-1. Read: `GET https://signal-api-24q4.onrender.com/llms.txt`
-2. Optional: `GET /agent/playbook`
-3. Discovery card: `GET /.well-known/agent-card.json`
-4. Primary call: `GET /omni?mint=<MINT>&view=agent`
-5. Before sizing: exit / `check_exit` if unknowns remain
-6. Calibrate occasionally: `GET /stats`
+1. `GET https://signal-api-24q4.onrender.com/llms.txt`
+2. `GET /agent/playbook`
+3. `GET /omni?mint=<MINT>&view=agent`
+4. If `action` is `skip` or `filter.pass` is false → do not size
+5. If `unknowns` non-empty → call exit / `check_exit` before any size talk
+6. Calibrate with `GET /stats` (same `rules_version`)
 
 ## MCP
 
 - URL: `https://signal-api-24q4.onrender.com/mcp`
 - Tools: `check_token_risk`, `check_tokens_batch`, `check_exit`, `get_track_record`, `screen_hot`
-- `screen_hot` = boost shortlist + filters only (not full-chain discovery)
+- `screen_hot` = boost shortlist only, not full-chain discovery
 
-## Agent view fields
+## Fields that matter
 
-| Field | Meaning |
-|-------|---------|
-| `action` | `pass` \| `review` \| `skip` |
-| `filter.pass` | Hard gate boolean |
-| `risk_score` | Heuristic 0–100 (higher = worse) |
-| `confidence` | low / medium (never treat as certainty) |
-| `data_quality` | completeness / freshness |
-| `sizing_hint` | policy hint only (`zero`, `tiny_or_skip`, …) |
-| `unknowns` | Missing checks — lower confidence |
-| `rules_version` | Compare outcomes within the same version |
+| Field | Use |
+|-------|-----|
+| `action` | pass / review / skip |
+| `filter.pass` | hard gate |
+| `risk_score` | 0–100, higher = worse |
+| `sizing_hint` | policy hint only |
+| `data_quality` | lower confidence if partial/stale |
+| `rules_version` | compare outcomes within version |
 
 ## Errors
 
-Machine-readable when available:
-
-```json
-{
-  "ok": false,
-  "error": {
-    "code": "RATE_LIMIT",
-    "retryable": true,
-    "agent_action": "backoff",
-    "retry_after_s": 30
-  }
-}
-```
-
-Honor `retryable` and never invent `filter.pass`.
+Honor `error.code`, `retryable`, `retry_after_s` when present.
