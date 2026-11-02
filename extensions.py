@@ -8484,6 +8484,102 @@ print(
 )
 
 
+
+# --- part144: antifragile / simplicity policy (docs + ops, no new heuristics) ---
+VERSION = "3.0.14"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+_ANTIFRAGILE = {
+    "name": "antifragile_lean",
+    "version": VERSION,
+    "summary": (
+        "Prefer a small, measurable risk gate over stacked fragile assumptions. "
+        "Stress and bad outcomes should improve the filter via /stats — not hidden complexity."
+    ),
+    "principles": [
+        "One primary gate: /omni + filter.pass + view=agent",
+        "Fail-closed: missing data, upstream errors, or avoid → do not size",
+        "No stealth retune: threshold changes bump rules_version + /rules changelog",
+        "Shadow before hard VETO (e.g. wallet_intel); promote only with track-record support",
+        "One concern per change; default refuse feature bloat (gRPC ms cancel, DePIN, online ML)",
+        "Free-tier limits (seed cap, cache TTL, cron=/ping only) are safety valves, not bugs",
+        "Client bots (gate/watch) stay outside the API process — their failure must not take down the gate",
+    ],
+    "do_not": [
+        "Auto-merge agent code into production",
+        "Optimize for narrative SI over measured avoid/ok separation",
+        "Add parallel scoring APIs that disagree silently with /omni",
+    ],
+    "measure": {
+        "stats": "GET /stats",
+        "rules": "GET /rules",
+        "health": "GET /health",
+        "same_rules_version": True,
+    },
+    "nfa": True,
+}
+
+
+@app.get("/ops/antifragile", tags=["ops"], summary="Lean / antifragile operating principles")
+@app.get("/ops/principles", include_in_schema=False)
+async def ops_antifragile():
+    return dict(_ANTIFRAGILE)
+
+
+# Enrich public /rules policy block when present
+try:
+    _rules_prev = None
+    for r in list(getattr(app, "routes", []) or []):
+        if getattr(r, "path", None) == "/rules" and hasattr(r, "endpoint"):
+            _rules_prev = r.endpoint
+            break
+    if callable(_rules_prev):
+        async def rules_public():
+            out = await _rules_prev()
+            if not isinstance(out, dict):
+                return out
+            pol = out.setdefault("policy", {})
+            if isinstance(pol, dict):
+                pol["antifragile_lean"] = True
+                pol["single_change_per_rules_version"] = True
+                pol["shadow_before_veto"] = True
+                pol["ops_principles"] = "GET /ops/antifragile"
+            cl = out.setdefault("changelog", [])
+            if isinstance(cl, list):
+                note = {
+                    "rules_version": out.get("rules_version") or globals().get("RULES_VERSION"),
+                    "at": "2026-11-02",
+                    "note": "Antifragile lean policy documented (/ops/antifragile); no threshold retune.",
+                }
+                # avoid duplicate same-day note
+                if not any(
+                    isinstance(x, dict) and x.get("at") == "2026-11-02" and "Antifragile" in str(x.get("note"))
+                    for x in cl
+                ):
+                    cl.insert(0, note)
+            out["app_version"] = VERSION
+            return out
+        # re-bind route endpoints named rules_public if stack allows
+        import fastapi
+        for r in list(app.routes):
+            if getattr(r, "path", None) in ("/rules", "/rules.json") and hasattr(r, "endpoint"):
+                r.endpoint = rules_public
+except Exception as e:
+    print("[part144] rules enrich:", str(e)[:100])
+
+# playbook one-liner if dict exists at import time — soft
+try:
+    _pb = globals().get("_tvibe_playbook_body")
+except Exception:
+    _pb = None
+
+print("[part144] v%s GET /ops/antifragile — lean principles, no new heuristics" % VERSION)
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
