@@ -8580,6 +8580,135 @@ except Exception:
 print("[part144] v%s GET /ops/antifragile — lean principles, no new heuristics" % VERSION)
 
 
+
+# --- part146: core product tradeoff (precision gate > alpha / zero-risk myth) ---
+VERSION = "3.0.16"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+_CORE_TRADEOFF = {
+    "title": "Core product tradeoff",
+    "version": VERSION,
+    "one_liner": (
+        "Trade the myth of catching every rug and millisecond alpha "
+        "for fewer false 'safe' passes, explicit trust limits, and a gate that stays runnable on free tier."
+    ),
+    "optimize_for": [
+        "Low false comfort: avoid high precision vs base rate when measured on /stats",
+        "Fail-closed agent contract: skip/review when data is weak",
+        "Published rules_version + trust assumptions",
+        "Operational simplicity (one primary gate, shadow before hard VETO)",
+    ],
+    "accept": [
+        "Some bad tokens only land in caution (imperfect recall)",
+        "Seconds-level latency and indexer/RPC dependence — not gRPC cancel",
+        "Public rules that sophisticated scammers can read",
+        "Best-effort public free instance (self-host for isolation)",
+    ],
+    "reject_as_core": [
+        "Sniper / execution router",
+        "Byzantine multi-node consensus for /omni",
+        "Stealth threshold retunes without rules_version",
+        "Feature bloat that does not improve false-safe rate or clarity of assumptions",
+    ],
+    "agent_rule": (
+        "Treat action=pass + filter.pass=true as a necessary gate, not a buy signal. "
+        "Non-empty unknowns or low confidence → do not size. NFA."
+    ),
+    "related": {
+        "trust": "GET /ops/trust",
+        "antifragile": "GET /ops/antifragile",
+        "stats": "GET /stats",
+        "rules": "GET /rules",
+        "agent": "GET /omni?mint=&view=agent",
+    },
+    "nfa": True,
+}
+
+# Compact trust block if part145 not deployed
+_TRUST_COMPACT = {
+    "title": "Trust assumptions (compact)",
+    "note": "Full list may also be on GET /ops/trust when that route exists.",
+    "you_are_trusting": [
+        "Configured Solana RPC honesty/liveness",
+        "Market indexers (Dex/Gecko) not systematically poisoned for the mint",
+        "Security oracles as inputs, not sole truth",
+        "Heuristics under the current rules_version correlate with /stats",
+        "Public instance is best-effort; agents honor action/unknowns",
+    ],
+    "nfa": True,
+}
+
+
+@app.get("/ops/tradeoff", tags=["ops"], summary="Core product risk tradeoff")
+@app.get("/ops/core-tradeoff", include_in_schema=False)
+async def ops_core_tradeoff():
+    return dict(_CORE_TRADEOFF)
+
+
+@app.get("/ops/trust", tags=["ops"], summary="Trust assumptions")
+@app.get("/trust", include_in_schema=False)
+async def ops_trust_assumptions_146():
+    # Prefer richer payload if an older part already defined it at runtime
+    return dict(_TRUST_COMPACT)
+
+
+# Agent view: never pass through weak unknowns; attach tradeoff pointer
+_av146 = globals().get("_tvibe_agent_view")
+if callable(_av146):
+    def _tvibe_agent_view(pkt: dict) -> dict:
+        out = _av146(pkt)
+        if not isinstance(out, dict):
+            return out
+        try:
+            unknowns = list(out.get("unknowns") or [])
+            action = out.get("action")
+            # Core tradeoff: refuse false comfort — unknowns block pass
+            if action == "pass" and unknowns:
+                out["action"] = "review"
+                cautions = list(out.get("cautions") or [])
+                msg = "unknowns present — pass blocked (precision over false comfort)"
+                if msg not in cautions:
+                    cautions.insert(0, msg)
+                out["cautions"] = cautions[:8]
+                if out.get("confidence") == "medium":
+                    out["confidence"] = "low"
+                out["agent_action"] = out.get("agent_action") or "review_then_exit_check"
+            out["product_tradeoff"] = "GET /ops/tradeoff"
+            out["version"] = VERSION
+        except Exception:
+            pass
+        return out
+
+
+# Enrich /rules policy
+try:
+    for r in list(getattr(app, "routes", []) or []):
+        if getattr(r, "path", None) == "/rules" and hasattr(r, "endpoint"):
+            _pr = r.endpoint
+
+            async def rules_tradeoff_wrap():
+                out = await _pr()
+                if isinstance(out, dict):
+                    pol = out.setdefault("policy", {})
+                    if isinstance(pol, dict):
+                        pol["core_tradeoff"] = "GET /ops/tradeoff"
+                        pol["optimize"] = "precision_gate_over_alpha"
+                        pol["trust_assumptions"] = "GET /ops/trust"
+                    out["app_version"] = VERSION
+                return out
+
+            r.endpoint = rules_tradeoff_wrap
+            break
+except Exception as e:
+    print("[part146] rules:", str(e)[:80])
+
+print("[part146] v%s GET /ops/tradeoff + agent unknowns block pass" % VERSION)
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
