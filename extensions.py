@@ -8709,6 +8709,119 @@ except Exception as e:
 print("[part146] v%s GET /ops/tradeoff + agent unknowns block pass" % VERSION)
 
 
+
+# --- part147: cycle literacy (tech vs price, real usage, winter survival) ---
+# Product framing only — no new token heuristics.
+
+VERSION = "3.0.17"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+_CYCLE = {
+    "title": "Cycle literacy — use the gate without self-deception",
+    "version": VERSION,
+    "summary": (
+        "Technology direction and token price path are not the same variable. "
+        "TVibe scores structural/risk evidence at time t; it does not certify revolutions or declare every mint a scam narrative."
+    ),
+    "principles": [
+        {
+            "id": "tech_vs_price",
+            "rule": "Separate technology/structure from price.",
+            "tvibe": "verdict/action are risk-structure signals, not predictions of future returns.",
+        },
+        {
+            "id": "real_usage",
+            "rule": "Prefer real usage evidence over speculative volume alone.",
+            "tvibe": "Product health = agents/bots calling the API + measured /stats outcomes, not Dex boost rank.",
+        },
+        {
+            "id": "winter_survival",
+            "rule": "Ask who survives a long winter (cashflow, lean ops, Lindy).",
+            "tvibe": "Free-tier lean design, open source, no dependency on a project token pumping.",
+        },
+        {
+            "id": "value_layer",
+            "rule": "Notice which layer accrues value (infra vs app) over time.",
+            "tvibe": "Stays an application-layer risk gate for agents — not L1, not an execution venue.",
+        },
+        {
+            "id": "early_vs_right",
+            "rule": "Early is not the same as right; timing and capital kill correct visions.",
+            "tvibe": "Refuse bloat 'because the future needs it'; ship only what improves false-safe rate or clarity.",
+        },
+        {
+            "id": "position_sizing",
+            "rule": "Survive drawdowns with position size, not certainty.",
+            "tvibe": "unknowns → review; sizing_hint; fail-closed gate; always NFA.",
+        },
+    ],
+    "two_symmetric_mistakes": [
+        "Treating every narrative as revolution (over-trust, oversize, overbuild)",
+        "Treating every cycle artifact as pure fraud theater (ignore real infra and measured tools)",
+    ],
+    "agent_guidance": (
+        "Use TVibe as a cycle-aware seatbelt: constrain false comfort during euphoria; "
+        "keep measuring in winter. Never equate pass with 'buy the vision'."
+    ),
+    "related": {
+        "tradeoff": "GET /ops/tradeoff",
+        "trust": "GET /ops/trust",
+        "antifragile": "GET /ops/antifragile",
+        "stats": "GET /stats",
+    },
+    "nfa": True,
+}
+
+
+@app.get("/ops/cycle", tags=["ops"], summary="Cycle literacy — tech vs price, real usage")
+@app.get("/ops/cycle-literacy", include_in_schema=False)
+async def ops_cycle_literacy():
+    return dict(_CYCLE)
+
+
+# Soft pointer on agent view
+_av147 = globals().get("_tvibe_agent_view")
+if callable(_av147):
+    def _tvibe_agent_view(pkt: dict) -> dict:
+        out = _av147(pkt)
+        if isinstance(out, dict) and not out.get("error"):
+            out.setdefault("cycle_literacy", "GET /ops/cycle")
+            out["version"] = VERSION
+            # Explicit: structure signal ≠ price forecast
+            out.setdefault(
+                "not_a_price_forecast",
+                True,
+            )
+        return out
+
+
+try:
+    for r in list(getattr(app, "routes", []) or []):
+        if getattr(r, "path", None) == "/rules" and hasattr(r, "endpoint"):
+            _pr = r.endpoint
+
+            async def rules_cycle_wrap():
+                out = await _pr()
+                if isinstance(out, dict):
+                    pol = out.setdefault("policy", {})
+                    if isinstance(pol, dict):
+                        pol["cycle_literacy"] = "GET /ops/cycle"
+                        pol["tech_vs_price"] = "separated"
+                    out["app_version"] = VERSION
+                return out
+
+            r.endpoint = rules_cycle_wrap
+            break
+except Exception as e:
+    print("[part147] rules:", str(e)[:80])
+
+print("[part147] v%s GET /ops/cycle — cycle literacy framing" % VERSION)
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
