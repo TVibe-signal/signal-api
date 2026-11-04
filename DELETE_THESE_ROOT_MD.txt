@@ -1,0 +1,24 @@
+After merging docs/README.md + root README.md, DELETE these root clutter files if they still exist:
+
+AGENTS.md
+DATA_FEEDER.md
+ENV_CHECKLIST.md
+OPS.md
+PHASE1_CHECKLIST.md
+PHASE1_README.md
+PHASE2_CALIBRATION.md
+PHASE2_README.md
+PHASE3_README.md
+PHASE3_WATCH.md
+README_STATS_SNIPPET.md
+X_AGENT_ONBOARD.md
+docs_CYCLE.md
+docs_TRADEOFF.md
+docs_FALSIFIABILITY.md
+README_CLIENT.md
+README_SNIPPET.md
+
+Keep only:
+  README.md
+  docs/README.md
+  (+ optional examples/)

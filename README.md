@@ -1,16 +1,25 @@
-# Client examples (not loaded by Render)
+# TVibe Signal
 
-Run on your machine / bot host only.
+Free open-source **Solana token risk API** for agents and humans.
 
-| Script | Role |
-|--------|------|
-| `gate.py` | `safe_to_buy(mint)` fail-closed helper |
-| `warmer.py` | Warm watchlist + CSV + optional Telegram |
-| `watch_recheck.py` | Phase 3a horizons 1h/6h/24h |
+**Not financial advice.**
 
-```bash
-pip install httpx
-python gate.py <MINT>
+- **Live:** https://signal-api-24q4.onrender.com  
+- **Docs (all-in-one):** [docs/README.md](docs/README.md)  
+- **X:** https://x.com/realTVibe · **Telegram:** https://t.me/Gotvibesolbot  
+
+```text
+GET /omni?mint=<MINT>&view=agent
+GET /stats · GET /rules · GET /ops/tradeoff · GET /ops/falsifiability
+MCP https://signal-api-24q4.onrender.com/mcp
 ```
 
-**NFA.** Do not deploy these as the Render start process.
+### Deploy
+
+- Build: `pip install -r requirements.txt`
+- Start: `python -m uvicorn main:app --host 0.0.0.0 --port $PORT`
+- Env: see [docs/README.md](docs/README.md) § Ops
+
+### Layout
+
+`main.py` · `core.py` · `features.py` · `extensions.py` · `docs/` · `examples/`
