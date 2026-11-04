@@ -8822,6 +8822,128 @@ except Exception as e:
 print("[part147] v%s GET /ops/cycle — cycle literacy framing" % VERSION)
 
 
+
+# --- part148: falsifiability criteria (what would prove the gate wrong) ---
+VERSION = "3.0.18"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+_FALSIFIABILITY = {
+    "title": "Falsifiability — what would prove this gate wrong",
+    "version": VERSION,
+    "summary": (
+        "If nothing could count as failure, treat certainty as a bug. "
+        "TVibe pre-commits to measurable failure criteria on /stats under the same rules_version."
+    ),
+    "claim": (
+        "Under a fixed rules_version, avoid labels concentrate bad outcomes above base rate, "
+        "and ok labels stay materially below base rate (horizon ~24h structural bad definition)."
+    ),
+    "failure_criteria": [
+        {
+            "id": "avoid_no_lift",
+            "fail_if": "avoid.full.bad_outcome_rate_pct is within ~3 points of base_rate (or lower) at n_avoid >= 200",
+            "means": "Avoid no longer separates from a random mint — gate lost its main job.",
+        },
+        {
+            "id": "ok_no_better_than_base",
+            "fail_if": "ok.full.bad_outcome_rate_pct >= base_rate - 5 at n_ok >= 150",
+            "means": "Ok is not safer than baseline — false comfort.",
+        },
+        {
+            "id": "gap_collapsed",
+            "fail_if": "avoid_vs_ok_gap_pts < 25 at resolved >= 1000",
+            "means": "Verdicts stopped ranking risk.",
+        },
+        {
+            "id": "score_non_monotonic",
+            "fail_if": "Higher risk_score buckets repeatedly show lower bad rates than lower buckets (stable, n large)",
+            "means": "risk_score inverted — do not trust sizing on score alone.",
+        },
+        {
+            "id": "stealth_or_unversioned_change",
+            "fail_if": "Thresholds change without rules_version bump + /rules changelog",
+            "means": "Process failure: results across time are not comparable.",
+        },
+    ],
+    "not_failure": [
+        "A single mint labeled ok that later dumps (noise; use rates + CI)",
+        "Imperfect recall (some rugs only in caution) — precision gate tradeoff by design",
+        "1h horizon weaker than 24h — early noise expected",
+        "Public free-tier 429/503 — ops limits, not theory falsification",
+    ],
+    "method": {
+        "in_sample_vs_out": "Prefer /stats selection_bias user vs seed; shadow rules before promote",
+        "pre_register": "Write failure criteria before changing heuristics; then measure",
+        "no_epicycles": "New flags must change measured outcomes, not only protect a narrative",
+        "claim_types": "Empirical rates on /stats ≠ philosophy on /ops/cycle ≠ NFA values",
+    },
+    "live_snapshot_hint": "Call GET /stats and compare to failure_criteria; do not hard-code stale rates here.",
+    "related": {
+        "stats": "GET /stats",
+        "rules": "GET /rules",
+        "tradeoff": "GET /ops/tradeoff",
+        "trust": "GET /ops/trust",
+    },
+    "nfa": True,
+}
+
+
+@app.get("/ops/falsifiability", tags=["ops"], summary="What would prove the risk gate wrong")
+@app.get("/ops/falsify", include_in_schema=False)
+async def ops_falsifiability():
+    body = dict(_FALSIFIABILITY)
+    # Optional live attachment (best-effort, never break)
+    try:
+        fn = globals().get("track_record_report") or globals().get("get_stats_payload")
+        # lightweight: only mark evaluated_at
+        import time as _t
+        body["evaluated_at"] = int(_t.time())
+        body["how_to_check"] = (
+            "GET /stats → base_rate, by_verdict.*.full.bad_outcome_rate_pct, "
+            "avoid_vs_ok_gap_pts, by_risk_bucket — same rules_version"
+        )
+    except Exception:
+        pass
+    return body
+
+
+_av148 = globals().get("_tvibe_agent_view")
+if callable(_av148):
+    def _tvibe_agent_view(pkt: dict) -> dict:
+        out = _av148(pkt)
+        if isinstance(out, dict) and not out.get("error"):
+            out.setdefault("falsifiability", "GET /ops/falsifiability")
+            out["version"] = VERSION
+        return out
+
+
+try:
+    for r in list(getattr(app, "routes", []) or []):
+        if getattr(r, "path", None) == "/rules" and hasattr(r, "endpoint"):
+            _pr = r.endpoint
+
+            async def rules_falsify_wrap():
+                out = await _pr()
+                if isinstance(out, dict):
+                    pol = out.setdefault("policy", {})
+                    if isinstance(pol, dict):
+                        pol["falsifiability"] = "GET /ops/falsifiability"
+                        pol["empirical_claim"] = "avoid_and_ok_separate_from_base_rate"
+                    out["app_version"] = VERSION
+                return out
+
+            r.endpoint = rules_falsify_wrap
+            break
+except Exception as e:
+    print("[part148] rules:", str(e)[:80])
+
+print("[part148] v%s GET /ops/falsifiability" % VERSION)
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
