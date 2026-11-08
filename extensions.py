@@ -9097,6 +9097,179 @@ if callable(_av149):
 print("[part149] v%s /ops/agent-safety /skill.json — free agent hygiene" % VERSION)
 
 
+
+# --- part150: fair-use headers + public docs (free, no payment) ---
+VERSION = "3.0.20"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+_FAIR_USE = {
+    "title": "Fair use — free public instance",
+    "version": VERSION,
+    "pricing": "free",
+    "summary": (
+        "TVibe Signal public API is free for reasonable agent and human use. "
+        "No API key and no payment required. Limits protect shared RPC/Redis/upstream quota."
+    ),
+    "please": [
+        "Prefer GET /omni?view=agent (one mint) over chatty multi-call patterns",
+        "Batch at most ~10 mints per wave; space waves (client fib backoff on 429/503)",
+        "Do not cron /omni — use GET /ping or /health for keep-alive only",
+        "Cache responses for valid_for_s when present",
+        "Self-host from GitHub if you need sustained high volume",
+    ],
+    "on_429_or_503": {
+        "honor_header": "Retry-After",
+        "client_hint": "Fibonacci backoff 1s,2s,3s,5s,8s,13s then stop or slow the wave",
+        "error_body": "Prefer error.code RATE_LIMIT / retryable when present",
+    },
+    "soft_targets_public": {
+        "note": "Best-effort, not a contractual SLA",
+        "seed_max_per_day": 40,
+        "suggested_gap_between_mints_s": 3,
+        "suggested_wave_pause_s": 60,
+    },
+    "headers": {
+        "Retry-After": "seconds to wait after 429 (when set)",
+        "X-TVibe-Fair-Use": "free; see GET /ops/fair-use",
+        "X-TVibe-Pricing": "free",
+    },
+    "endpoints": {
+        "fair_use": "GET /ops/fair-use",
+        "pricing": "GET /pricing",
+        "skill": "GET /skill.json",
+        "health": "GET /health",
+    },
+    "nfa": True,
+}
+
+
+@app.get("/ops/fair-use", tags=["ops"], summary="Fair use policy for the free public instance")
+@app.get("/pricing", tags=["product"], summary="Pricing: free (fair use)")
+@app.get("/fair-use", include_in_schema=False)
+async def ops_fair_use():
+    return dict(_FAIR_USE)
+
+
+# Response headers middleware (fair-use advertisement + Retry-After on 429)
+try:
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import Request as _StarletteRequest
+    from starlette.responses import Response as _StarletteResponse
+
+    class _FairUseMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: _StarletteRequest, call_next):
+            response: _StarletteResponse = await call_next(request)
+            try:
+                response.headers.setdefault("X-TVibe-Pricing", "free")
+                response.headers.setdefault(
+                    "X-TVibe-Fair-Use",
+                    "free; GET /ops/fair-use",
+                )
+                if response.status_code == 429 and "Retry-After" not in response.headers:
+                    # default soft pause when handler forgot the header
+                    response.headers["Retry-After"] = "15"
+                if response.status_code == 503 and "Retry-After" not in response.headers:
+                    response.headers["Retry-After"] = "5"
+            except Exception:
+                pass
+            return response
+
+    app.add_middleware(_FairUseMiddleware)
+    print("[part150] FairUse middleware attached")
+except Exception as e:
+    print("[part150] middleware:", str(e)[:100])
+
+
+# Patch JSONResponse 429 paths that omit Retry-After (best-effort wrap)
+try:
+    import fastapi.responses as _fr
+    _OrigJSON = _fr.JSONResponse
+
+    class _JSONResponseFair(_OrigJSON):
+        def __init__(self, content, status_code=200, headers=None, **kwargs):
+            headers = dict(headers or {})
+            if status_code == 429 and "Retry-After" not in headers and "retry-after" not in {k.lower() for k in headers}:
+                # try body retry_after_s
+                ra = None
+                if isinstance(content, dict):
+                    err = content.get("error") if isinstance(content.get("error"), dict) else content
+                    if isinstance(err, dict):
+                        ra = err.get("retry_after_s") or err.get("retry_after")
+                if ra is not None:
+                    try:
+                        headers["Retry-After"] = str(int(ra))
+                    except Exception:
+                        headers["Retry-After"] = "15"
+                else:
+                    headers["Retry-After"] = "15"
+            super().__init__(content, status_code=status_code, headers=headers, **kwargs)
+
+    _fr.JSONResponse = _JSONResponseFair
+    # also bind common global name if used as JSONResponse from starlette
+    try:
+        import starlette.responses as _sr
+        # do not replace starlette globally aggressively — fastapi.responses is enough for most routes
+    except Exception:
+        pass
+except Exception as e:
+    print("[part150] JSONResponse patch:", str(e)[:80])
+
+
+# Enrich llms + skill + playbook pointers
+try:
+    for r in list(getattr(app, "routes", []) or []):
+        if getattr(r, "path", None) == "/skill.json" and hasattr(r, "endpoint"):
+            _sk = r.endpoint
+
+            async def skill_fair_wrap():
+                out = await _sk()
+                if isinstance(out, dict):
+                    out["fair_use"] = "GET /ops/fair-use"
+                    out["pricing"] = "free"
+                return out
+
+            r.endpoint = skill_fair_wrap
+            break
+except Exception as e:
+    print("[part150] skill:", str(e)[:60])
+
+try:
+    for r in list(getattr(app, "routes", []) or []):
+        if getattr(r, "path", None) in ("/llms.txt", "/llms") and hasattr(r, "endpoint"):
+            _ll = r.endpoint
+
+            async def llms_fair_wrap():
+                res = await _ll()
+                body = res if isinstance(res, str) else None
+                if body is None and hasattr(res, "body"):
+                    try:
+                        body = res.body.decode() if isinstance(res.body, (bytes, bytearray)) else str(res.body)
+                    except Exception:
+                        body = None
+                if body is None or "Fair use" in body:
+                    return res
+                extra = (
+                    "\n\n## Fair use (free)\n"
+                    "- Public instance is free; no payment.\n"
+                    "- On HTTP 429/503 honor Retry-After; backoff then slow down.\n"
+                    "- Do not cron /omni; keep-alive via /ping only.\n"
+                    "- Details: GET /ops/fair-use and GET /pricing\n"
+                )
+                from starlette.responses import PlainTextResponse
+                return PlainTextResponse(body.rstrip() + extra, media_type="text/plain; charset=utf-8")
+
+            r.endpoint = llms_fair_wrap
+            break
+except Exception as e:
+    print("[part150] llms:", str(e)[:60])
+
+print("[part150] v%s GET /ops/fair-use /pricing + fair-use response headers" % VERSION)
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
