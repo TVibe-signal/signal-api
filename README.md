@@ -1,25 +1,13 @@
-# TVibe Signal
+# TVibe client helpers (Fibonacci backoff)
 
-Free open-source **Solana token risk API** for agents and humans.
+- `retry_fib.py` — sleep ladder 1,2,3,5,8,13s on 429/503/502
+- `gate.py` — `safe_to_buy` fail-closed + fib retries
+- `warmer.py` — watchlist warmer with same backoff
 
-**Not financial advice.**
-
-- **Live:** https://signal-api-24q4.onrender.com  
-- **Docs (all-in-one):** [docs/README.md](docs/README.md)  
-- **X:** https://x.com/realTVibe · **Telegram:** https://t.me/Gotvibesolbot  
-
-```text
-GET /omni?mint=<MINT>&view=agent
-GET /stats · GET /rules · GET /ops/tradeoff · GET /ops/falsifiability
-MCP https://signal-api-24q4.onrender.com/mcp
+```bash
+pip install httpx
+python gate.py <MINT>
+EVERY_S=900 python warmer.py
 ```
 
-### Deploy
-
-- Build: `pip install -r requirements.txt`
-- Start: `python -m uvicorn main:app --host 0.0.0.0 --port $PORT`
-- Env: see [docs/README.md](docs/README.md) § Ops
-
-### Layout
-
-`main.py` · `core.py` · `features.py` · `extensions.py` · `docs/` · `examples/`
+Not deployed on Render. NFA.
