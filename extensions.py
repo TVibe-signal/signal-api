@@ -9459,6 +9459,97 @@ async def ops_upgrade_status():
 print("[part152] v%s upstream honesty + /ops/upgrade-status" % VERSION)
 
 
+
+# --- part153: response freshness (as_of / valid_for_s / stale — not execution cancel) ---
+VERSION = "3.0.23"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+import time as _time_mod
+
+
+def _freshness_attach(out: dict) -> dict:
+    """Ensure agent payloads carry explicit time bounds. No order cancel — API is not an OMS."""
+    if not isinstance(out, dict) or out.get("error"):
+        return out
+    now = int(_time_mod.time())
+    out.setdefault("as_of", now)
+    # Prefer existing valid_for_s from decision/filter
+    vfs = out.get("valid_for_s")
+    if vfs is None and isinstance(out.get("decision"), dict):
+        vfs = out["decision"].get("valid_for_s")
+    if vfs is None and isinstance(out.get("filter"), dict):
+        vfs = out["filter"].get("valid_for_s")
+    try:
+        vfs = int(vfs) if vfs is not None else 30
+    except Exception:
+        vfs = 30
+    # Degrade TTL when unknowns mention market/upstream
+    unk = out.get("unknowns") or []
+    if any(
+        isinstance(u, str)
+        and (
+            "market" in u
+            or "upstream" in u
+            or "source" in u
+            or "degraded" in u
+        )
+        for u in unk
+    ):
+        vfs = min(vfs, 15)
+    out["valid_for_s"] = max(5, min(vfs, 300))
+    out["expires_at"] = out["as_of"] + out["valid_for_s"]
+    out["freshness"] = {
+        "as_of": out["as_of"],
+        "valid_for_s": out["valid_for_s"],
+        "expires_at": out["expires_at"],
+        "policy": "Do not size after expires_at; re-fetch /omni. Not an order-cancel engine.",
+    }
+    # Mirror onto decision/filter if present
+    if isinstance(out.get("decision"), dict):
+        out["decision"].setdefault("valid_for_s", out["valid_for_s"])
+    if isinstance(out.get("filter"), dict):
+        out["filter"].setdefault("valid_for_s", out["valid_for_s"])
+    out["version"] = VERSION
+    return out
+
+
+_av153 = globals().get("_tvibe_agent_view")
+if callable(_av153):
+    def _tvibe_agent_view(pkt: dict) -> dict:
+        return _freshness_attach(_av153(pkt))
+
+
+@app.get("/ops/freshness", tags=["ops"], summary="How long a signal remains usable")
+async def ops_freshness_policy():
+    return {
+        "title": "Response freshness",
+        "version": VERSION,
+        "summary": (
+            "Each agent payload should include as_of, valid_for_s, expires_at. "
+            "After expires_at, re-query. This is data TTL — not exchange order cancellation."
+        ),
+        "client_rules": [
+            "If time.time() > expires_at → treat as stale; do not pass/safe_to_buy",
+            "On 429/503 use fib backoff then re-fetch",
+            "Shorter valid_for_s when unknowns include market/upstream degradation",
+        ],
+        "not_in_scope": [
+            "Wall-clock sync clusters",
+            "Smart order routing",
+            "Cancel-replace on chain",
+        ],
+        "related": {"agent": "GET /omni?view=agent", "fair_use": "GET /ops/fair-use"},
+        "nfa": True,
+    }
+
+
+print("[part153] v%s as_of/valid_for_s/expires_at on agent view + /ops/freshness" % VERSION)
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
