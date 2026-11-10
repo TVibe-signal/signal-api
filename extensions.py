@@ -9270,6 +9270,195 @@ except Exception as e:
 print("[part150] v%s GET /ops/fair-use /pricing + fair-use response headers" % VERSION)
 
 
+
+# --- part151: system limits (demo≠product, no absolute proof, no anthropomorphism) ---
+VERSION = "3.0.21"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+_LIMITS = {
+    "title": "System limits — design around them",
+    "version": VERSION,
+    "summary": (
+        "TVibe is a measurable heuristic risk gate, not a proof of safety, not a mind, "
+        "and not a demo that replaces production judgment."
+    ),
+    "demo_vs_product": {
+        "product_signals": [
+            "GET /stats under a fixed rules_version",
+            "HTTP errors, unknowns, free-tier 429/503",
+            "GET /ops/fair-use and GET /ops/trust",
+        ],
+        "not_enough_alone": ["One impressive mint JSON", "SI / consciousness narrative"],
+    },
+    "evaluation": {
+        "measure_on": "GET /stats vs base_rate",
+        "failure_criteria": "GET /ops/falsifiability",
+        "baseline": "base_rate, not zero-loss oracle",
+    },
+    "language": {
+        "prefer": ["heuristic", "track record", "fail-closed", "unknowns", "rules_version"],
+        "avoid_anthropomorphism": ["understands", "thinks", "conscious"],
+    },
+    "no_absolute_proof": {
+        "claim": "No fixed rule set covers all regimes; no zero-rug proof.",
+        "layers_instead": [
+            "Multi-source + fail-closed",
+            "Shadow before hard VETO",
+            "Public rules_version + /stats",
+            "Client gate separate from API",
+        ],
+    },
+    "related": {
+        "tradeoff": "GET /ops/tradeoff",
+        "falsifiability": "GET /ops/falsifiability",
+        "trust": "GET /ops/trust",
+        "fair_use": "GET /ops/fair-use",
+        "stats": "GET /stats",
+    },
+    "nfa": True,
+}
+
+
+@app.get("/ops/limits", tags=["ops"], summary="System limits")
+@app.get("/limits", include_in_schema=False)
+async def ops_system_limits():
+    return dict(_LIMITS)
+
+
+_av151 = globals().get("_tvibe_agent_view")
+if callable(_av151):
+    def _tvibe_agent_view(pkt: dict) -> dict:
+        out = _av151(pkt)
+        if isinstance(out, dict) and not out.get("error"):
+            out.setdefault("system_limits", "GET /ops/limits")
+            out.setdefault("not_consciousness", True)
+            out.setdefault("not_absolute_safety_proof", True)
+            out["version"] = VERSION
+        return out
+
+print("[part151] v%s GET /ops/limits" % VERSION)
+
+
+# --- part152: upstream-down honesty + seed soft status (no heuristic retune) ---
+VERSION = "3.0.22"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+
+def _upstream_status_snapshot():
+    """Best-effort read of health upstream block if present in process."""
+    try:
+        # common patterns in this codebase
+        for name in ("_upstream_state", "upstream_status", "UPSTREAM_STATE"):
+            st = globals().get(name)
+            if isinstance(st, dict) and st:
+                return st
+    except Exception:
+        pass
+    return None
+
+
+_av152 = globals().get("_tvibe_agent_view")
+if callable(_av152):
+    def _tvibe_agent_view(pkt: dict) -> dict:
+        out = _av152(pkt)
+        if not isinstance(out, dict) or out.get("error"):
+            return out
+        try:
+            # If sources mention missing market data, keep fail-closed posture visible
+            unk = list(out.get("unknowns") or [])
+            src = out.get("sources") if isinstance(out.get("sources"), dict) else {}
+            # soften language when market sources missing
+            for k in ("dexscreener", "geckoterminal", "market"):
+                v = src.get(k) if src else None
+                if v in ("missing", "error", "down", False):
+                    msg = "market_source_degraded"
+                    if msg not in unk:
+                        unk.append(msg)
+            if unk:
+                out["unknowns"] = unk[:12]
+                if out.get("action") == "pass":
+                    out["action"] = "review"
+                    c = list(out.get("cautions") or [])
+                    tip = "upstream/market data degraded — pass blocked"
+                    if tip not in c:
+                        c.insert(0, tip)
+                    out["cautions"] = c[:8]
+            out["version"] = VERSION
+        except Exception:
+            pass
+        return out
+
+
+# Enrich /seed JSON when no candidates (route may already exist)
+try:
+    for r in list(getattr(app, "routes", []) or []):
+        if getattr(r, "path", None) == "/seed" and hasattr(r, "endpoint"):
+            _seed = r.endpoint
+
+            async def seed_soft_wrap(request=None):
+                try:
+                    # endpoint may or may not take request
+                    import inspect
+                    if request is not None and len(inspect.signature(_seed).parameters) >= 1:
+                        out = await _seed(request)
+                    else:
+                        try:
+                            out = await _seed()
+                        except TypeError:
+                            out = await _seed(request)
+                except TypeError:
+                    out = await _seed()
+                if isinstance(out, dict) and out.get("ok") is False:
+                    out.setdefault(
+                        "hint",
+                        "Boost/profile feeds empty or upstream market APIs down. "
+                        "Retry later; nurture via /omni on known mints; keep SEED_MAX_PER_DAY low.",
+                    )
+                    out.setdefault("fair_use", "GET /ops/fair-use")
+                    out.setdefault("upstream_hint", "GET /health → upstream")
+                return out
+
+            r.endpoint = seed_soft_wrap
+            break
+except Exception as e:
+    print("[part152] seed wrap:", str(e)[:80])
+
+
+@app.get("/ops/upgrade-status", tags=["ops"], summary="What to improve next (data-driven, no stealth retune)")
+async def ops_upgrade_status():
+    return {
+        "version": VERSION,
+        "do_now": [
+            "If GET /health upstream is both_down: wait/retry; do not retune heuristics",
+            "Nurture diverse mints via /omni view=agent (raises ok/avoid n on /stats)",
+            "Deploy this build so GET /ops/limits exists",
+        ],
+        "do_not": [
+            "Change rules_version without falsifiability breach",
+            "Cron /omni",
+            "Treat pass as financial advice",
+        ],
+        "check": {
+            "stats": "GET /stats",
+            "falsifiability": "GET /ops/falsifiability",
+            "health": "GET /health",
+            "limits": "GET /ops/limits",
+        },
+        "nfa": True,
+    }
+
+
+print("[part152] v%s upstream honesty + /ops/upgrade-status" % VERSION)
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
