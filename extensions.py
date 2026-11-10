@@ -9550,6 +9550,118 @@ async def ops_freshness_policy():
 print("[part153] v%s as_of/valid_for_s/expires_at on agent view + /ops/freshness" % VERSION)
 
 
+
+# --- part154: satisficing checklist + single CTA (choice architecture, no new scores) ---
+VERSION = "3.0.24"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+_SATISFICE = {
+    "title": "Satisficing gate — good enough, not the best mint",
+    "version": VERSION,
+    "one_cta": "GET /omni?mint=<MINT>&view=agent",
+    "summary": (
+        "Narrow the choice set before comparing. TVibe offers three actions only. "
+        "pass means the pre-written bar was cleared — not that the mint is optimal."
+    ),
+    "precommit_checklist": [
+        {"id": "action", "if": "action is skip", "then": "do not size"},
+        {"id": "review", "if": "action is review OR unknowns non-empty", "then": "do not size; exit-check or skip"},
+        {"id": "filter", "if": "filter.pass is not true", "then": "do not size"},
+        {"id": "fresh", "if": "now > expires_at (or missing freshness)", "then": "re-fetch; do not size"},
+        {"id": "pass", "if": "action is pass AND filter.pass AND no unknowns AND still fresh", "then": "optional small size only; still NFA"},
+    ],
+    "default_suggestion": {
+        "primary": "Call view=agent once per mint",
+        "not": "Do not rank 50 mints looking for the global maximum",
+        "position": "Prefer fixed small size rules written before the call",
+    },
+    "actions_only": ["pass", "review", "skip"],
+    "related": {
+        "playbook": "GET /agent/playbook",
+        "freshness": "GET /ops/freshness",
+        "fair_use": "GET /ops/fair-use",
+        "tradeoff": "GET /ops/tradeoff",
+    },
+    "nfa": True,
+}
+
+
+@app.get("/ops/satisficing", tags=["ops"], summary="Good-enough checklist — not best mint")
+@app.get("/ops/checklist", include_in_schema=False)
+async def ops_satisficing():
+    return dict(_SATISFICE)
+
+
+_av154 = globals().get("_tvibe_agent_view")
+if callable(_av154):
+    def _tvibe_agent_view(pkt: dict) -> dict:
+        out = _av154(pkt)
+        if isinstance(out, dict) and not out.get("error"):
+            out.setdefault("satisficing", True)
+            out.setdefault(
+                "cta",
+                "Use action pass|review|skip only; pass is good-enough gate not best mint",
+            )
+            out.setdefault("checklist", "GET /ops/satisficing")
+            out["version"] = VERSION
+        return out
+
+
+try:
+    for r in list(getattr(app, "routes", []) or []):
+        if getattr(r, "path", None) in ("/agent/playbook", "/playbook") and hasattr(r, "endpoint"):
+            _pb = r.endpoint
+
+            async def playbook_satisfice_wrap():
+                out = await _pb()
+                if isinstance(out, dict):
+                    out["satisficing"] = _SATISFICE["precommit_checklist"]
+                    out["one_cta"] = _SATISFICE["one_cta"]
+                    out["good_enough_not_best"] = True
+                    out["version"] = VERSION
+                return out
+
+            r.endpoint = playbook_satisfice_wrap
+except Exception as e:
+    print("[part154] playbook:", str(e)[:80])
+
+try:
+    for r in list(getattr(app, "routes", []) or []):
+        if getattr(r, "path", None) in ("/llms.txt", "/llms") and hasattr(r, "endpoint"):
+            _ll = r.endpoint
+
+            async def llms_satisfice_wrap():
+                res = await _ll()
+                body = res if isinstance(res, str) else None
+                if body is None and hasattr(res, "body"):
+                    try:
+                        body = res.body.decode() if isinstance(res.body, (bytes, bytearray)) else str(res.body)
+                    except Exception:
+                        body = None
+                if body is None or "Satisficing" in body:
+                    return res
+                extra = (
+                    "\n\n## Satisficing\n"
+                    "- One CTA: GET /omni?mint=&view=agent\n"
+                    "- Actions only: pass | review | skip\n"
+                    "- pass = cleared pre-written bar, not the best mint\n"
+                    "- Checklist: GET /ops/satisficing\n"
+                )
+                from starlette.responses import PlainTextResponse
+                return PlainTextResponse(body.rstrip() + extra, media_type="text/plain; charset=utf-8")
+
+            r.endpoint = llms_satisfice_wrap
+            break
+except Exception as e:
+    print("[part154] llms:", str(e)[:80])
+
+print("[part154] v%s GET /ops/satisficing — checklist + one CTA" % VERSION)
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
