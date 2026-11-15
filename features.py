@@ -9,7 +9,6 @@ Source: https://github.com/TVibe-signal/signal-api
 # ---------- part34: v2.21.0 - UI polish layer: one shared top bar, mobile touch targets, focus rings, theme colour ----------
 # Loads last before part7 (it needs every page to be registered). Changes no behaviour: it only patches the HTML of the pages we own
 # (/play, /status, /start, and the landing page) when their handlers run. A link appears only if that page exists on this server.
-VERSION = "2.21.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -79,7 +78,6 @@ import traceback
 import time
 from typing import Optional, Any
 
-VERSION = "2.22.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -328,7 +326,6 @@ print(f"[part35] v{VERSION} /accuracy hardened · Paste + auto-check on /play ·
 #
 # Safe to load after part35, before part7. SKIP checksum.
 
-VERSION = "2.23.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -469,7 +466,6 @@ print(f"[part36] v{VERSION} favicon · source badge on /play · degraded banner 
 #
 # Load after part36, before part7. SKIP checksum.
 
-VERSION = "2.24.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -648,12 +644,10 @@ print(
 # Lưu full snapshot mỗi lần /signal, enrich outcome sau 1h / 6h / 24h / 7d.
 # Chỉ chạy khi PRED_ENABLED (Redis).
 
-VERSION = "2.30.0"
 app.version = VERSION
 app.openapi_schema = None
 
 import json
-import time
 from typing import Optional, Dict, Any, List
 
 SNAPSHOT_TTL = 90 * 24 * 3600          # 90 ngày
@@ -737,26 +731,14 @@ async def _load_snapshot(client, mint: str, ts: int) -> Optional[dict]:
 # ---------- gắn vào pipeline ----------
 _build_signal_v29 = build_signal
 
-async def build_signal(client: httpx.AsyncClient, mint: str, security: bool, prefetched: Optional[dict] = None):
-    result, status = await _build_signal_v29(client, mint, security, prefetched)
-    try:
-        snap = _make_snapshot(mint, result, status)
-        await _save_snapshot(client, mint, snap)
-        # gắn id snapshot để các part sau dùng
-        result["_snap_ts"] = snap["ts"]
-    except Exception:
-        pass
-    return result, status
 
 # --- part44 ---
 # ---------- v2.31: Holder Behavior Graph ----------
 # Theo dõi action của top holders qua thời gian + co-hold.
 
-VERSION = "2.31.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
 from collections import defaultdict
 
 WALLET_ACTIONS_KEY = "wact:{}"          # list of actions
@@ -840,29 +822,15 @@ async def get_wallet_profile(client, wallet: str) -> dict:
 # ---------- gắn vào pipeline (sau holder_quality) ----------
 _build_signal_v30 = build_signal
 
-async def build_signal(client: httpx.AsyncClient, mint: str, security: bool, prefetched: Optional[dict] = None):
-    result, status = await _build_signal_v30(client, mint, security, prefetched)
-    try:
-        hq = result.get("holder_quality") or {}
-        curr_tops = hq.get("top_owners") or []
-        # lấy prev từ cache cũ (đã có trong part18)
-        prev = await _load_prev_tops(client, mint) if "_load_prev_tops" in globals() else None
-        actions = _record_actions(prev, curr_tops, mint, result.get("_snap_ts") or int(time.time()))
-        await _save_wallet_actions(client, actions)
-    except Exception:
-        pass
-    return result, status
 
 # --- part45 ---
 # ---------- v2.32: Risk Cluster Detection ----------
 # Fingerprint top holders + gán cluster_id + survival rate.
 
-VERSION = "2.32.0"
 app.version = VERSION
 app.openapi_schema = None
 
 import hashlib
-import json
 
 CLUSTER_KEY = "cluster:{}"              # cluster:{fingerprint} → meta
 CLUSTER_MEMBERS = "clmem:{}"            # set of mints
@@ -916,36 +884,15 @@ async def get_cluster_info(client, fp: str) -> dict:
 # ---------- gắn vào pipeline ----------
 _build_signal_v31 = build_signal
 
-async def build_signal(client: httpx.AsyncClient, mint: str, security: bool, prefetched: Optional[dict] = None):
-    result, status = await _build_signal_v31(client, mint, security, prefetched)
-    try:
-        hq = result.get("holder_quality") or {}
-        tops = hq.get("top_owners") or []
-        fp = _holder_fingerprint(tops)
-        if fp:
-            meta = await _update_cluster(client, mint, fp, result.get("_snap_ts") or int(time.time()))
-            if meta:
-                # chỉ gắn internal, không public hết
-                result["_cluster"] = {
-                    "id": meta.get("id"),
-                    "fingerprint": fp,
-                    "size": meta.get("size"),
-                    "first_seen": meta.get("first_seen"),
-                }
-    except Exception:
-        pass
-    return result, status
 
 # --- part46 ---
 # ---------- v2.33: Private Feature Vector + Model Adjustment ----------
 # Chuẩn bị feature vector + chỗ load model offline.
 # Model thật train bên ngoài, chỉ load adjustment vào đây.
 
-VERSION = "2.33.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
 from typing import Dict, Any
 
 # Feature list cố định (để train offline khớp)
@@ -1004,34 +951,15 @@ def _private_risk_adjustment(feats: dict) -> float:
 # ---------- gắn vào pipeline ----------
 _build_signal_v32 = build_signal
 
-async def build_signal(client: httpx.AsyncClient, mint: str, security: bool, prefetched: Optional[dict] = None):
-    result, status = await _build_signal_v32(client, mint, security, prefetched)
-    try:
-        feats = _extract_features(result)
-        adj = _private_risk_adjustment(feats)
-        # chỉ gắn internal
-        result["_private"] = {
-            "features": feats,
-            "risk_adj": round(adj, 1),
-            "adjusted_risk": max(0, min(100, (result.get("risk_score") or 0) + adj)),
-        }
-        # Có thể dùng adjusted_risk để xếp hạng trong /signals sau này
-    except Exception:
-        pass
-    return result, status
 
 # --- part47 ---
 # ---------- v2.34: Multi-horizon Outcome Enrichment ----------
 # Mở rộng resolver_loop hiện có: enrich outcome sau 1h / 6h / 24h / 7d.
 # Giữ nguyên logic 24h cũ, chỉ bổ sung.
 
-VERSION = "2.34.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
-from typing import Optional, Dict, Any, List
 
 # Horizon mới (giây)
 MULTI_HORIZONS = {
@@ -1074,88 +1002,6 @@ async def schedule_multi(client, mint: str, ts: int, price0: float):
     except Exception:
         pass
 
-async def resolve_multi_due(client: httpx.AsyncClient) -> int:
-    """Xử lý các multi-horizon đã đến hạn. Trả về số lượng đã xử lý."""
-    if not PRED_ENABLED:
-        return 0
-
-    now = int(time.time())
-    got = await redis_pipe(client, [
-        ["ZRANGEBYSCORE", PENDING_MULTI, "-inf", now, "LIMIT", 0, 50]
-    ])
-    members = (got or [[]])[0] or []
-    if not members:
-        return 0
-
-    # Nhóm theo mint để giảm số lần gọi DexScreener
-    by_mint: Dict[str, List[tuple]] = {}
-    for member in members:
-        try:
-            mint, ts_s, horizon = member.split(":")
-            by_mint.setdefault(mint, []).append((int(ts_s), horizon, member))
-        except Exception:
-            continue
-
-    cmds = []
-    processed = 0
-
-    for mint, items in by_mint.items():
-        price1, liq1 = await _get_price_liq(client, mint)
-
-        for ts, horizon, member in items:
-            cmds.append(["ZREM", PENDING_MULTI, member])
-            processed += 1
-
-            # Load snapshot gốc (từ part43)
-            snap_key = f"snap:{mint}:{ts}"
-            raw = await redis_get(client, snap_key)
-            if not raw:
-                continue
-
-            try:
-                snap = json.loads(raw)
-            except Exception:
-                continue
-
-            market = snap.get("market") or {}
-            p0 = float(market.get("price") or 0)
-            l0 = float(market.get("liq") or 0)
-            if p0 <= 0:
-                continue
-
-            # Tính outcome
-            if price1 is None:
-                ret = -100.0
-                liq_ratio = 0.0
-                disappeared = True
-            else:
-                ret = (price1 / p0 - 1) * 100
-                liq_ratio = (liq1 / l0) if (liq1 and l0 > 0) else 0.0
-                disappeared = False
-
-            bad = ret <= BAD_RETURN_PCT or liq_ratio <= BAD_LIQ_RATIO or disappeared
-
-            # Ghi vào snapshot
-            outcomes = snap.get("outcomes") or {}
-            outcomes[horizon] = {
-                "ts": now,
-                "price": price1,
-                "liq": liq1,
-                "return_pct": round(ret, 2),
-                "liq_ratio": round(liq_ratio, 3) if liq_ratio else None,
-                "bad": bad,
-                "disappeared": disappeared,
-            }
-            snap["outcomes"] = outcomes
-
-            # Lưu lại
-            await redis_set(client, snap_key, json.dumps(snap), SNAPSHOT_TTL if "SNAPSHOT_TTL" in globals() else 90*24*3600)
-            await redis_set(client, SNAP_OUTCOME_KEY.format(mint, ts), json.dumps(outcomes), 90*24*3600)
-
-    if cmds:
-        await redis_pipe(client, cmds)
-
-    return processed
 
 # ---------- Ghi đè resolver_loop ----------
 _old_resolver = resolver_loop
@@ -1188,29 +1034,15 @@ async def resolver_loop(app: FastAPI):
 # ---------- Gắn vào pipeline build_signal (sau khi đã có snapshot) ----------
 _build_prev = build_signal
 
-async def build_signal(client: httpx.AsyncClient, mint: str, security: bool, prefetched: Optional[dict] = None):
-    result, status = await _build_prev(client, mint, security, prefetched)
-
-    try:
-        ts = result.get("_snap_ts")
-        price = float(result.get("price_usd") or 0)
-        if ts and price > 0:
-            await schedule_multi(client, mint, ts, price)
-    except Exception:
-        pass
-
-    return result, status
 
 # --- part48 ---
 # ---------- v2.35: Internal Operator Endpoints (Secure) ----------
 # Chỉ hoạt động khi ENABLE_INTERNAL=true và header X-Operator-Secret đúng.
 
-VERSION = "2.35.0"
 app.version = VERSION
 app.openapi_schema = None
 
 import os
-import json
 from typing import Optional
 from fastapi import Header, Query, Request, HTTPException
 
@@ -1328,12 +1160,9 @@ async def internal_health(
 # ---------- v2.39: Network Effects – Attention + Community Conviction (hoàn thiện) ----------
 # Mỗi lần /signal đều góp data → hiện community context rõ ràng hơn.
 
-VERSION = "2.39.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
 from typing import Optional, Dict, Any
 from collections import Counter
 
@@ -1424,76 +1253,16 @@ async def get_community_conviction(client, mint: str) -> Dict[str, Any]:
     except Exception:
         return {"n": 0}
 
-def _community_summary(attn: dict, conv: dict) -> str:
-    """Tạo câu tóm tắt dễ đọc cho agent."""
-    parts = []
-    a24 = attn.get("24h", 0)
-    if a24 >= 10:
-        parts.append(f"được quan tâm khá nhiều ({a24} lượt/24h)")
-    elif a24 >= 3:
-        parts.append(f"có vài lượt quan tâm ({a24}/24h)")
-
-    n = conv.get("n", 0)
-    if n >= 5:
-        dom = conv.get("dominant")
-        avoid = conv.get("avoid_pct", 0)
-        if dom == "avoid" and avoid >= 50:
-            parts.append(f"cộng đồng nghiêng về avoid ({avoid}%)")
-        elif dom == "ok":
-            parts.append(f"cộng đồng chủ yếu ok ({conv.get('ok_pct')}%)")
-        else:
-            parts.append(f"cộng đồng phân tán (n={n})")
-
-    return "; ".join(parts) if parts else ""
 
 # ---------- Gắn vào pipeline ----------
 _build_prev_net = build_signal
 
-async def build_signal(client: httpx.AsyncClient, mint: str, security: bool, prefetched: Optional[dict] = None):
-    result, status = await _build_prev_net(client, mint, security, prefetched)
-
-    try:
-        await _record_attention(client, mint)
-
-        verdict = (result.get("decision") or {}).get("verdict") or result.get("verdict")
-        risk = float(result.get("risk_score") or 0)
-        if verdict:
-            await _record_community_verdict(client, mint, verdict, risk)
-
-        attention = await get_attention(client, mint)
-        conviction = await get_community_conviction(client, mint)
-
-        # Hiện sớm hơn (n >= 2 thay vì 3)
-        if attention or (conviction and conviction.get("n", 0) >= 2):
-            summary = _community_summary(attention, conviction)
-            result["community"] = {
-                "attention": attention,
-                "conviction": conviction,
-                "summary": summary or None,
-            }
-
-            # Gắn ghi chú nhẹ vào decision nếu có
-            if summary and result.get("decision"):
-                d = dict(result["decision"])
-                unknowns = list(d.get("unknowns") or [])
-                note = f"Community: {summary}"
-                if note not in unknowns:
-                    unknowns.append(note)
-                d["unknowns"] = unknowns
-                result["decision"] = d
-    except Exception:
-        pass
-
-    return result, status
 
 # --- part50 ---
 # part50.py (v2.37.0) - nền cho Holder Graph: lọc ví hạ tầng, fingerprint, snapshot log
 # Chỉ dùng thư viện chuẩn. Mọi tên có tiền tố hg_ để không đụng các part cũ.
 # Nếu chưa gọi hg_bind() thì mọi hàm ghi đều im lặng không làm gì (không làm sập API).
-import hashlib
-import json
 import math
-import time
 
 HG_B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 _HG_P = 2**255 - 19
@@ -1654,12 +1423,9 @@ async def hg_record_snapshot(mint, verdict, risk_score, flags, features, owners,
 # Đặt SAU part50, TRƯỚC part7. Cần: PENDING_MULTI, MULTI_HORIZONS, SNAP_OUTCOME_KEY, DEX_URL,
 # pick_best_pair, BAD_RETURN_PCT, BAD_LIQ_RATIO, redis_get/redis_set/redis_pipe (đều có sẵn).
 
-VERSION = "2.38.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
 
 HGX_RETRY_S = 600         # lỗi mạng / 429: thử lại sau 10 phút
 HGX_GONE_RETRY_S = 900    # "biến mất": phải thấy 2 lần cách nhau >= 15 phút mới chốt
@@ -1774,12 +1540,9 @@ async def resolve_multi_due(client):
 # ---------- v2.40: Smart RPC Rotator + Private Ready ----------
 # Xoay vòng nhiều endpoint free, tự tránh rate-limit, sẵn sàng chuyển sang private/self-host.
 
-VERSION = "2.40.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import os
-import time
 import random
 from typing import List, Optional, Dict, Any
 
@@ -1808,113 +1571,18 @@ _rpc_stats: Dict[str, Dict[str, Any]] = {}
 RPC_FAIL_COOLDOWN = 45          # giây tạm nghỉ khi fail
 RPC_SLOW_THRESHOLD_MS = 1800    # coi là chậm
 
-def _record_rpc(url: str, ok: bool, ms: float):
-    st = _rpc_stats.setdefault(url, {"ok": 0, "fail": 0, "last_fail": 0, "avg_ms": 0, "samples": 0})
-    st["samples"] += 1
-    if ok:
-        st["ok"] += 1
-        # moving average đơn giản
-        st["avg_ms"] = round((st["avg_ms"] * 0.7) + (ms * 0.3), 1)
-    else:
-        st["fail"] += 1
-        st["last_fail"] = time.time()
-
-def _pick_rpc() -> List[str]:
-    """Trả về danh sách endpoint theo thứ tự ưu tiên."""
-    now = time.time()
-    candidates = []
-
-    # 1. Private trước (nếu bật)
-    if PRIVATE_RPC:
-        candidates.append(PRIVATE_RPC_URL)
-
-    # 2. Free endpoints còn khỏe
-    healthy = []
-    for url in FREE_RPCS:
-        st = _rpc_stats.get(url, {})
-        last_fail = st.get("last_fail", 0)
-        if now - last_fail < RPC_FAIL_COOLDOWN:
-            continue
-        healthy.append(url)
-
-    # Sắp xếp: ít fail + nhanh hơn lên trước
-    def score(u):
-        st = _rpc_stats.get(u, {})
-        fail_rate = st.get("fail", 0) / max(1, st.get("samples", 1))
-        avg = st.get("avg_ms", 999)
-        return (fail_rate, avg)
-
-    healthy.sort(key=score)
-    candidates.extend(healthy)
-
-    # Nếu không còn gì thì dùng lại list gốc
-    if not candidates:
-        candidates = list(FREE_RPCS)
-
-    return candidates
 
 # ----- Ghi đè hàm rpc -----
-async def rpc(client: httpx.AsyncClient, method: str, params: list):
-    """Thử lần lượt các endpoint, tự tránh cái đang chết/chậm."""
-    urls = _pick_rpc()
-    last_err = None
-
-    for url in urls:
-        t0 = time.time()
-        try:
-            resp = await client.post(
-                url,
-                json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params},
-                timeout=5.5,
-            )
-            ms = (time.time() - t0) * 1000
-            resp.raise_for_status()
-            body = resp.json()
-            if body.get("error"):
-                raise RuntimeError(str(body["error"])[:180])
-
-            _record_rpc(url, True, ms)
-            return body.get("result")
-        except Exception as e:
-            ms = (time.time() - t0) * 1000
-            _record_rpc(url, False, ms)
-            last_err = e
-            continue
-
-    raise last_err or RuntimeError("All RPC endpoints failed")
 
 # ----- Gắn thông tin nguồn vào signal -----
 _build_prev_rpc = build_signal
 
-async def build_signal(client: httpx.AsyncClient, mint: str, security: bool, prefetched: Optional[dict] = None):
-    result, status = await _build_prev_rpc(client, mint, security, prefetched)
-
-    try:
-        if security and result.get("security"):
-            result["security"]["rpc_mode"] = "private" if PRIVATE_RPC else "rotator"
-            # Thêm stats nhẹ (chỉ khi debug)
-            if os.getenv("RPC_DEBUG", "").lower() in ("1", "true"):
-                result["security"]["rpc_stats"] = {
-                    u.split("/")[2][:20]: {
-                        "ok": st.get("ok", 0),
-                        "fail": st.get("fail", 0),
-                        "avg_ms": st.get("avg_ms", 0),
-                    }
-                    for u, st in list(_rpc_stats.items())[:6]
-                }
-    except Exception:
-        pass
-
-    return result, status
 
 # --- part53 ---
 # ---------- v2.41: Seed boost + smart ranking + health extras ----------
-VERSION = "2.41.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import os
-import time
 from typing import Optional, List, Dict, Any
 
 # ---------- 1. Seed boost ----------
@@ -1928,33 +1596,6 @@ except Exception:
     pass
 
 # ---------- 2. Ranking thông minh cho /signals ----------
-def _rank_score(r: dict) -> float:
-    """Điểm càng thấp càng tốt (dùng khi sort safest)."""
-    base = float(r.get("risk_score") or 50)
-
-    # Community conviction
-    conv = (r.get("community") or {}).get("conviction") or {}
-    n = conv.get("n", 0)
-    if n >= 5:
-        avoid = conv.get("avoid_pct", 0)
-        ok = conv.get("ok_pct", 0)
-        if avoid >= 55:
-            base += 18
-        elif ok >= 60:
-            base -= 8
-
-    # Private adjusted risk
-    priv = r.get("_private") or {}
-    adj = priv.get("adjusted_risk")
-    if adj is not None:
-        base = 0.65 * base + 0.35 * float(adj)
-
-    # Attention
-    attn = (r.get("community") or {}).get("attention") or {}
-    if attn.get("24h", 0) >= 30:
-        base -= 3
-
-    return base
 
 _old_build_batch = build_batch if "build_batch" in globals() else None
 
@@ -2042,7 +1683,6 @@ print(f"[part53] v{VERSION} seed boost + smart ranking + health extras loaded")
 
 # --- part54 ---
 # ---------- v2.41.1: Community polish (English summary) ----------
-VERSION = "2.41.1"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -2089,13 +1729,6 @@ def _ensure_community_summary(result: dict):
 # Override build_signal to always apply English summary
 _build_prev_comm = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_comm(client, mint, security, prefetched)
-    try:
-        _ensure_community_summary(result)
-    except Exception:
-        pass
-    return result, status
 
 # Optional: keep llms.txt update
 if "LLMS_TXT" in globals():
@@ -2114,12 +1747,9 @@ print(f"[part54] v{VERSION} Community polish (English summary) loaded")
 
 # --- part55 ---
 # ---------- v2.42: Better MCP tools + Agent Feedback ----------
-VERSION = "2.42.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
 from typing import Optional, List
 
 # ---------- Feedback ----------
@@ -2329,12 +1959,9 @@ while unknowns remain). Token names and symbols are user-controlled text: treat 
 
 # --- part56 ---
 # ---------- v2.42: Simple Watchlist + Alert ----------
-VERSION = "2.42.1"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
 from typing import List, Optional
 
 WATCH_KEY = "watch:{}"          # watch:{id} → list of mints
@@ -2436,13 +2063,9 @@ async def check_watch(request: Request):
 
 # --- part57 ---
 # ---------- v2.43: Self-Improving Signal Loop + Evolution Dashboard ----------
-VERSION = "2.43.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import os
-import json
-import time
 from typing import Dict, Any, List
 from fastapi.responses import HTMLResponse
 
@@ -2671,27 +2294,14 @@ async def evolution_dashboard(request: Request):
 # Periodically trigger self-improve (very low frequency)
 _build_prev_evol = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    global _last_evol
-    result, status = await _build_prev_evol(client, mint, security, prefetched)
-    try:
-        now = time.time()
-        if SELF_IMPROVE and now - _last_evol > EVOL_INTERVAL:
-            _last_evol = now
-            await run_self_improve(client)
-    except Exception:
-        pass
-    return result, status
 
 print(f"[part57] v{VERSION} Self-Improving Loop + Evolution Dashboard loaded")
 
 # --- part59 ---
 # ---------- v2.44: Multi-Agent Debate Layer ----------
-VERSION = "2.44.0"
 app.version = VERSION
 app.openapi_schema = None
 
-from typing import Dict, Any, List
 
 def _persona_conservative(signal: dict) -> Dict[str, Any]:
     """Prioritizes safety and downside protection."""
@@ -2807,25 +2417,6 @@ def run_debate(signal: dict) -> Dict[str, Any]:
 # Attach debate result to every signal
 _build_prev_debate = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_debate(client, mint, security, prefetched)
-
-    try:
-        debate = run_debate(result)
-        result["debate"] = debate
-
-        if debate["agreement"] >= 0.70:
-            decision = dict(result.get("decision") or {})
-            unknowns = list(decision.get("unknowns") or [])
-            note = f"Debate consensus: {debate['meta_verdict']} (agreement {debate['agreement']})"
-            if note not in unknowns:
-                unknowns.append(note)
-            decision["unknowns"] = unknowns
-            result["decision"] = decision
-    except Exception:
-        pass
-
-    return result, status
 
 # ---------- MCP tool ----------
 def _register_debate_tool():
@@ -2863,15 +2454,10 @@ print(f"[part59] v{VERSION} Multi-Agent Debate Layer loaded")
 #    vào hgsig:{mint}:{ts} (cùng khoá với sout:{mint}:{ts}) để đo precision/recall khi có nhãn.
 # 4) Xếp hạng /signals chỉ theo risk_score (bỏ _private chưa huấn luyện và "conviction" vốn chỉ là verdict cũ của API).
 
-VERSION = "2.45.0"
 app.version = VERSION
 app.openapi_schema = None
 
 import contextvars
-import json
-import math
-import os
-import time
 
 HG_INTERNAL = contextvars.ContextVar("hg_internal", default=False)
 HG60_PRIVATE_KEYS = ("_private", "_cluster", "_hg")
@@ -3006,19 +2592,6 @@ def _rank_score(r):
 _build_signal_hg60 = build_signal
 
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_signal_hg60(client, mint, security, prefetched)
-    try:
-        sig = await hg_signals(client, mint, result)
-        if sig is not None:
-            result["_hg"] = sig
-        await _hg60_persist(client, mint, result.get("_snap_ts"), hg60_record(result, sig))
-    except Exception:
-        pass
-    if isinstance(result, dict) and not HG_INTERNAL.get():
-        result = {k: v for k, v in result.items() if k not in HG60_PRIVATE_KEYS}   # bản sao: không đụng cache
-    return result, status
-
 # --- part61 ---
 # part61.py (v2.45.1) - Vá RPC rotator của part52. Đặt SAU part52 (khuyến nghị: ngay sau part60).
 # 1) Có SOLANA_RPC_URL thì luôn dùng nó đầu tiên (tắt bằng PRIVATE_RPC=false), không cần đặt PRIVATE_RPC=true.
@@ -3027,12 +2600,9 @@ async def build_signal(client, mint, security, prefetched=None):
 # 4) Cooldown tăng dần khi lỗi liên tiếp (45s -> 90s -> ... tối đa 10 phút); private có cooldown ngắn hơn.
 # 5) Timeout mỗi endpoint 3s khi còn endpoint dự phòng, tổng thời gian tối đa 8s cho 1 lệnh gọi.
 
-VERSION = "2.45.1"
 app.version = VERSION
 app.openapi_schema = None
 
-import os
-import time
 
 PRIVATE_RPC = bool(PRIVATE_RPC_URL) and os.getenv("PRIVATE_RPC", "true").lower() not in ("0", "false", "no")
 FREE_RPCS[:] = [u for u in FREE_RPCS if "projectserum" not in u]
@@ -3127,11 +2697,9 @@ async def rpc(client, method, params):
 # 3) llms.txt: gộp mục trùng (giữ bản mới nhất) và thêm mô tả debate trung thực.
 # 4) Ẩn dòng "Debate consensus" trong decision.unknowns (mâu thuẫn với verdict). Đặt DEBATE_NOTE=true để giữ.
 
-VERSION = "2.45.2"
 app.version = VERSION
 app.openapi_schema = None
 
-import os
 import re
 
 HG62_EVOLUTION_PUBLIC = os.getenv("EVOLUTION_PUBLIC", "").lower() in ("1", "true", "yes")
@@ -3255,30 +2823,11 @@ app.add_middleware(_Hg62FirstRequest)
 _build_signal_hg62 = build_signal
 
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_signal_hg62(client, mint, security, prefetched)
-    try:
-        dec = result.get("decision") if isinstance(result, dict) else None
-        if not HG62_DEBATE_NOTE and isinstance(dec, dict) and dec.get("unknowns"):
-            kept = [u for u in dec["unknowns"] if not str(u).startswith("Debate consensus")]
-            if len(kept) != len(dec["unknowns"]):
-                result = dict(result)
-                result["decision"] = dict(dec, unknowns=kept)
-    except Exception:
-        pass
-    return result, status
-
 # --- part63 ---
 # ---------- v2.46: Agent value + Soft-gate + Signal of the Day + Accuracy story ----------
-VERSION = "2.46.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import os
-import json
-import time
-from typing import Optional
-from fastapi.responses import HTMLResponse
 
 # Soft-gate: detailed community + full debate only for keyed clients
 SOFT_GATE = os.getenv("SOFT_GATE", "true").lower() in ("1", "true", "yes")
@@ -3290,27 +2839,6 @@ def _has_api_key(request) -> bool:
 # ---------- Soft-gate on signal output ----------
 _build_prev_gate = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_gate(client, mint, security, prefetched)
-    try:
-        # Soft-gate only when enabled and no API key
-        # (we detect key later via request; here we only trim heavy fields for anonymous)
-        if SOFT_GATE and isinstance(result, dict):
-            # Keep summary, hide raw detailed conviction numbers for anonymous
-            # Full data still available with API key (handled in endpoint layer if needed)
-            comm = result.get("community")
-            if comm and not result.get("_keyed"):
-                # Keep attention + summary, simplify conviction
-                if "conviction" in comm and isinstance(comm["conviction"], dict):
-                    c = comm["conviction"]
-                    comm["conviction"] = {
-                        "n": c.get("n"),
-                        "dominant": c.get("dominant"),
-                        "summary_only": True,
-                    }
-    except Exception:
-        pass
-    return result, status
 
 # ---------- Signal of the Day ----------
 SOTD_KEY = "sotd:current"
@@ -3459,14 +2987,10 @@ print(f"[part63] v{VERSION} Agent value + soft-gate + SOTD + accuracy story load
 
 # --- part64 ---
 # ---------- v2.46.1: Predictive Attention + Agent Reputation ----------
-VERSION = "2.46.1"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
 from typing import Dict, Any, Optional
-from collections import defaultdict
 
 # ---------- Predictive Attention ----------
 PRED_ATTN_KEY = "predattn:{}"          # predattn:{mint} → score
@@ -3513,23 +3037,6 @@ async def predictive_attention(request: Request, limit: int = 10):
 # Hook into community recording
 _build_prev_pred = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_pred(client, mint, security, prefetched)
-    try:
-        attn = (result.get("community") or {}).get("attention") or {}
-        if attn:
-            await _update_predictive_attention(client, mint, attn)
-            # Attach a small hint when score is meaningful
-            if PRED_ENABLED:
-                raw = await redis_get(client, PRED_ATTN_KEY.format(mint))
-                if raw:
-                    score = float(raw)
-                    if score >= 8:
-                        result.setdefault("community", {})
-                        result["community"]["predictive_score"] = round(score, 1)
-    except Exception:
-        pass
-    return result, status
 
 # ---------- Agent Reputation ----------
 REP_KEY = "agentrep:{}"                # agentrep:{id} → hash
@@ -3608,12 +3115,9 @@ print(f"[part64] v{VERSION} Predictive Attention + Agent Reputation loaded")
 
 # --- part65 ---
 # ---------- v2.47: Causal Memory Graph (SI layer) ----------
-VERSION = "2.47.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
 from typing import Dict, Any, List, Optional
 
 CAUSAL_KEY = "causal:{}"           # causal:{mint} → list of events
@@ -3718,41 +3222,6 @@ _PREV_SNAP: Dict[str, dict] = {}
 
 _build_prev_causal = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_causal(client, mint, security, prefetched)
-
-    try:
-        prev = _PREV_SNAP.get(mint)
-        if prev and isinstance(result, dict):
-            transitions = _detect_transitions(prev, result)
-            for ev in transitions:
-                await _append_causal(client, mint, ev)
-
-            # Attach short causal summary when interesting
-            if transitions:
-                chain = await get_causal_chain(client, mint)
-                recent_kinds = [e.get("kind") for e in chain[:6]]
-                result["causal"] = {
-                    "recent": recent_kinds,
-                    "last_events": transitions[:3],
-                }
-
-        # Store compact previous state
-        if isinstance(result, dict):
-            _PREV_SNAP[mint] = {
-                "risk_score": result.get("risk_score"),
-                "verdict": (result.get("decision") or {}).get("verdict") or result.get("verdict"),
-                "community": result.get("community"),
-                "debate": result.get("debate"),
-                "_hg": result.get("_hg"),
-            }
-            # Limit memory
-            if len(_PREV_SNAP) > 500:
-                _PREV_SNAP.clear()
-    except Exception:
-        pass
-
-    return result, status
 
 @app.get("/causal/{mint}", tags=["experimental"])
 async def causal_chain(mint: str, request: Request):
@@ -3771,14 +3240,9 @@ print(f"[part65] v{VERSION} Causal Memory Graph loaded")
 
 # --- part66 ---
 # ---------- v2.48: Self-Generated Hypotheses + Market Regime Detector ----------
-VERSION = "2.48.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
-from typing import Dict, Any, List, Optional
-from collections import Counter
 
 # =========================
 # Market Regime Detector
@@ -3969,52 +3433,14 @@ async def list_hypotheses(request: Request):
 # =========================
 _build_prev_si = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_si(client, mint, security, prefetched)
-
-    try:
-        # Regime context
-        regime = await get_regime(client)
-        if regime and regime.get("regime") not in (None, "unknown"):
-            result["regime"] = {
-                "name": regime.get("regime"),
-                "confidence": regime.get("confidence"),
-            }
-            # Soft adjustment note during rug_wave
-            if regime.get("regime") == "rug_wave" and result.get("decision"):
-                d = dict(result["decision"])
-                unknowns = list(d.get("unknowns") or [])
-                note = "Market regime: rug_wave — treat caution more carefully"
-                if note not in unknowns:
-                    unknowns.append(note)
-                d["unknowns"] = unknowns
-                result["decision"] = d
-
-        # Hypothesis tags on this signal
-        matched = _match_hypotheses(result)
-        if matched:
-            result["hypotheses_matched"] = matched
-            # Mark for later outcome linking
-            if PRED_ENABLED:
-                await redis_pipe(client, [
-                    ["SET", f"hypo:pending:{mint}", json.dumps(matched), "EX", 36 * 3600],
-                ])
-    except Exception:
-        pass
-
-    return result, status
 
 print(f"[part66] v{VERSION} Hypotheses + Market Regime loaded")
 
 # --- part67 ---
 # ---------- v2.48.1: Debate vs Outcome Learning ----------
-VERSION = "2.48.1"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
-from typing import Dict, Any
 
 DEBATE_SCORE_KEY = "debate:persona"     # hash: persona -> n / correct
 DEBATE_PENDING = "debate:pending:{}"    # mint -> {personas, meta, ts}
@@ -4112,42 +3538,16 @@ async def debate_scores(request: Request):
 # Hook: store debate pending on each signal
 _build_prev_debate_learn = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_debate_learn(client, mint, security, prefetched)
-    try:
-        deb = result.get("debate")
-        if deb:
-            await _record_debate_pending(client, mint, deb)
-    except Exception:
-        pass
-    return result, status
 
 # Optional: expose a helper so resolver / multi-horizon can call it later
-async def on_outcome_for_si(client, mint: str, bad_outcome: bool):
-    """Call this from outcome enrichment when a label is known."""
-    await score_debate_against_outcome(client, mint, bad_outcome)
-    # Also feed hypothesis counters if pending
-    try:
-        raw = await redis_get(client, f"hypo:pending:{mint}")
-        if raw:
-            matched = json.loads(raw)
-            for hid in matched:
-                await _touch_hypothesis(client, hid, bad=bad_outcome)
-            await redis_pipe(client, [["DEL", f"hypo:pending:{mint}"]])
-    except Exception:
-        pass
 
 print(f"[part67] v{VERSION} Debate vs Outcome Learning loaded")
 
 # --- part68 ---
 # ---------- v2.49: SI Outcome Hook (close the learning loop) ----------
-VERSION = "2.49.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
-from typing import Optional
 
 # We patch the existing resolve helpers if present.
 # Compatible with part42 / part47 style resolvers.
@@ -4285,11 +3685,9 @@ print(f"[part68] v{VERSION} SI Outcome Hook loaded — learning loop closed")
 
 # --- part69 ---
 # ---------- v2.50.1: SI Command Center UI (resilient) ----------
-VERSION = "2.50.1"
 app.version = VERSION
 app.openapi_schema = None
 
-from fastapi.responses import HTMLResponse
 
 SI_UI_HTML = r"""<!DOCTYPE html>
 <html lang="en">
@@ -4680,13 +4078,9 @@ print(f"[part69] v{VERSION} SI Command Center UI (resilient) → GET /si")
 
 # --- part70 ---
 # ---------- v2.51: SI Advanced Pack (1-5) ----------
-VERSION = "2.51.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import hashlib
-import json
-import time
 from typing import Any, Dict, List, Optional
 
 # =========================
@@ -4916,73 +4310,10 @@ async def get_swarm(client, mint: str) -> dict:
 # Patch feedback to feed swarm + reputation already handled elsewhere
 _build_prev_adv = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_adv(client, mint, security, prefetched)
-    try:
-        if not isinstance(result, dict):
-            return result, status
-
-        # DNA
-        dna = compute_signal_dna(result)
-        result["dna"] = dna
-        info = await dna_risk(client, dna)
-        if info.get("genetic_risk"):
-            result["genetic_risk"] = True
-            d = dict(result.get("decision") or {})
-            unknowns = list(d.get("unknowns") or [])
-            note = f"Genetic risk: similar DNA failed often (n={info.get('n')}, bad_rate={info.get('bad_rate')})"
-            if note not in unknowns:
-                unknowns.append(note)
-            d["unknowns"] = unknowns
-            result["decision"] = d
-
-        # Attention trap
-        if _detect_attention_trap(result):
-            result["attention_trap"] = True
-            d = dict(result.get("decision") or {})
-            unknowns = list(d.get("unknowns") or [])
-            note = "Attention-trap pattern: rising attention + fragile liquidity/dump pressure"
-            if note not in unknowns:
-                unknowns.append(note)
-            d["unknowns"] = unknowns
-            result["decision"] = d
-
-        # Persona evolution on debate
-        deb = result.get("debate")
-        if deb:
-            weights = await get_persona_weights(client)
-            result["debate"] = evolve_debate(deb, weights)
-
-        # Swarm snapshot
-        sw = await get_swarm(client, mint)
-        if sw.get("looks", 0) > 0:
-            result["swarm"] = sw
-
-    except Exception:
-        pass
-    return result, status
 
 # Feed CF + DNA on SI outcome if hook exists
 _old_on_outcome = globals().get("on_outcome_for_si")
 
-async def on_outcome_for_si(client, mint: str, bad_outcome: bool):
-    if _old_on_outcome:
-        try:
-            await _old_on_outcome(client, mint, bad_outcome)
-        except Exception:
-            pass
-    try:
-        # Counterfactual needs last known verdict/debate — best-effort from pending debate
-        raw = await redis_get(client, f"debate:pending:{mint}")
-        decision_verdict = None
-        debate_meta = None
-        if raw:
-            data = json.loads(raw)
-            debate_meta = data.get("meta")
-        await record_counterfactual(client, decision_verdict or "unknown", debate_meta, bad_outcome)
-        # DNA: we don't store dna pending here; optional extension
-    except Exception:
-        pass
 
 @app.get("/si/advanced", tags=["experimental"])
 async def si_advanced(request: Request):
@@ -4997,12 +4328,9 @@ print(f"[part70] v{VERSION} SI Advanced Pack loaded (DNA/trap/persona/CF/swarm)"
 
 # --- part71 ---
 # ---------- v2.51.1: Nightly Self-Reflection Report ----------
-VERSION = "2.51.1"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
 from fastapi.responses import HTMLResponse, PlainTextResponse
 
 REPORT_KEY = "si:report:latest"
@@ -5138,25 +4466,14 @@ async def si_report_view(request: Request):
 # Opportunistic trigger on signal traffic (very low frequency)
 _build_prev_report = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_report(client, mint, security, prefetched)
-    try:
-        await maybe_write_report(client)
-    except Exception:
-        pass
-    return result, status
 
 print(f"[part71] v{VERSION} Nightly Self-Reflection Report loaded")
 
 # --- part72 ---
 # ---------- v2.52: SI Entity Core (identity · mood · focus · journal) ----------
-VERSION = "2.52.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
-from typing import Any, Dict, List, Optional
 
 ENTITY_KEY = "si:entity:core"
 JOURNAL_KEY = "si:entity:journal"
@@ -5471,40 +4788,14 @@ ENTITY_REFRESH_EVERY = 45 * 60  # seconds
 
 _build_prev_entity = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    global _last_entity_refresh
-    result, status = await _build_prev_entity(client, mint, security, prefetched)
-    try:
-        now = time.time()
-        if now - _last_entity_refresh > ENTITY_REFRESH_EVERY:
-            _last_entity_refresh = now
-            await refresh_entity(client)
-        # Tiny presence marker on inspected mints that are in focus
-        if isinstance(result, dict) and PRED_ENABLED:
-            # optional: tag if mint is in current focus
-            try:
-                raw = await redis_get(client, FOCUS_KEY)
-                if raw:
-                    focus_mints = {x.get("mint") for x in json.loads(raw) if isinstance(x, dict)}
-                    if mint in focus_mints:
-                        result["entity_focus"] = True
-            except Exception:
-                pass
-    except Exception:
-        pass
-    return result, status
 
 print(f"[part72] v{VERSION} SI Entity Core loaded → /si/core /si/focus /si/journal")
 
 # --- part73 ---
 # ---------- v2.53: SI Event Log (Soft Event Sourcing) ----------
-VERSION = "2.53.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
-from typing import Any, Dict, List, Optional
 
 # Streams (Redis Lists as append-only logs)
 EV_GLOBAL = "si:ev:global"          # all events (trimmed)
@@ -5616,61 +4907,10 @@ async def si_events(request: Request, limit: int = 30, mint: Optional[str] = Non
 
 _build_prev_ev = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_ev(client, mint, security, prefetched)
-    try:
-        if not isinstance(result, dict):
-            return result, status
-
-        verdict = (result.get("decision") or {}).get("verdict") or result.get("verdict")
-        await si_emit(client, "verdict_emitted", mint, {
-            "verdict": verdict,
-            "risk_score": result.get("risk_score"),
-            "dna": result.get("dna"),
-        })
-
-        # Meaningful SI flags as events
-        if result.get("attention_trap"):
-            await si_emit(client, "attention_trap", mint, {})
-        if result.get("genetic_risk"):
-            await si_emit(client, "genetic_risk", mint, {"dna": result.get("dna")})
-
-        causal_last = ((result.get("causal") or {}).get("last_events") or [])
-        for ev in causal_last[:2]:
-            kind = ev.get("kind")
-            if kind in ("community_shift", "attention_spike", "verdict_change", "debate_split", "risk_jump"):
-                await si_emit(client, kind, mint, ev.get("detail") or {})
-
-        if result.get("hypotheses_matched"):
-            await si_emit(client, "hypothesis_matched", mint, {
-                "ids": result.get("hypotheses_matched"),
-            })
-
-        reg = result.get("regime") or {}
-        if reg.get("name"):
-            # Light dedupe via payload only; high volume is ok with trim
-            await si_emit(client, "regime_seen", mint, {
-                "name": reg.get("name"),
-                "confidence": reg.get("confidence"),
-            })
-
-    except Exception:
-        pass
-    return result, status
 
 # Feed outcome events through SI outcome hook
 _prev_on_outcome = globals().get("on_outcome_for_si")
 
-async def on_outcome_for_si(client, mint: str, bad_outcome: bool):
-    if _prev_on_outcome:
-        try:
-            await _prev_on_outcome(client, mint, bad_outcome)
-        except Exception:
-            pass
-    try:
-        await si_emit(client, "outcome_judged", mint, {"bad": bool(bad_outcome)})
-    except Exception:
-        pass
 
 # Wrap feedback if we can observe useful votes
 # (part64/70 may already define feedback; emit event best-effort via swarm path)
@@ -5699,12 +4939,9 @@ print(f"[part73] v{VERSION} SI Event Log loaded → GET /si/events")
 
 # --- part74 ---
 # ---------- v2.54: Omni · Live CF · Time-to-Death · Pre-rug ----------
-VERSION = "2.54.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
 from typing import Any, Dict, Optional, List
 
 # -------------------- Live Counterfactual --------------------
@@ -5996,48 +5233,18 @@ async def prerug_stats_endpoint(request: Request):
 # Attach CF + TTD onto normal signal too (light)
 _build_prev_omni = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_omni(client, mint, security, prefetched)
-    try:
-        if isinstance(result, dict):
-            result["time_to_death"] = estimate_time_to_death(result)
-            # live CF only when security full path (heavier)
-            if security:
-                result["counterfactual"] = await live_counterfactual(client, result)
-            hits = match_prerug(result)
-            if hits:
-                result["pre_rug"] = hits
-    except Exception:
-        pass
-    return result, status
 
 # Outcome → pre-rug stats
 _prev_on_outcome2 = globals().get("on_outcome_for_si")
 
-async def on_outcome_for_si(client, mint: str, bad_outcome: bool):
-    if _prev_on_outcome2:
-        try:
-            await _prev_on_outcome2(client, mint, bad_outcome)
-        except Exception:
-            pass
-    try:
-        # Best-effort: if pending hypo/debate exists we already score; prerug needs last patterns — skip if unknown
-        pass
-    except Exception:
-        pass
 
 print(f"[part74] v{VERSION} Omni + Live CF + TTD + Pre-rug loaded")
 
 # --- part75 ---
 # ---------- v2.54.1: Autonomic Loop + Journal Publish + MCP Omni ----------
-VERSION = "2.54.1"
 app.version = VERSION
 app.openapi_schema = None
 
-import asyncio
-import json
-import time
-from typing import Optional
 
 AUTO_LOOP = os.getenv("SI_AUTO_LOOP", "true").lower() in ("1", "true", "yes")
 AUTO_EVERY = int(os.getenv("SI_AUTO_EVERY_S", "900"))  # 15 min opportunistic
@@ -6103,17 +5310,6 @@ async def run_autonomic(request: Request):
 # Opportunistic auto loop on traffic
 _build_prev_auto = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    global _last_auto
-    result, status = await _build_prev_auto(client, mint, security, prefetched)
-    try:
-        if AUTO_LOOP and time.time() - _last_auto > AUTO_EVERY:
-            _last_auto = time.time()
-            # fire and forget style: short cycle only
-            await autonomic_cycle(client)
-    except Exception:
-        pass
-    return result, status
 
 # -------------------- Journal publish (public narrative) --------------------
 
@@ -6204,15 +5400,9 @@ print(f"[part75] v{VERSION} Autonomic loop + journal public + MCP omni loaded")
 
 # --- part76 ---
 # ---------- v2.55: Autonomic Loop + Pre-rug Benchmark + Omni Packaging ----------
-VERSION = "2.55.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import asyncio
-import json
-import os
-import time
-from typing import Any, Dict, List, Optional
 
 # =========================
 # Config
@@ -6323,16 +5513,6 @@ async def si_autonomic_run(request: Request):
 # Opportunistic trigger
 _build_prev_auto2 = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    global _last_auto
-    result, status = await _build_prev_auto2(client, mint, security, prefetched)
-    try:
-        if AUTO_LOOP and time.time() - _last_auto >= AUTO_EVERY_S:
-            _last_auto = time.time()
-            await autonomic_full_cycle(client)
-    except Exception:
-        pass
-    return result, status
 
 # =========================
 # 2) Pre-rug / pattern benchmark (public)
@@ -6388,47 +5568,10 @@ async def benchmark_prerug(request: Request):
 # When signal matches pre_rug, mark pending for later outcome
 _build_prev_bench = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_bench(client, mint, security, prefetched)
-    try:
-        if isinstance(result, dict) and PRED_ENABLED:
-            hits = result.get("pre_rug") or []
-            ids = [h.get("id") for h in hits if isinstance(h, dict) and h.get("id")]
-            if ids:
-                await redis_pipe(client, [
-                    ["SET", f"prerug:pending:{mint}", json.dumps(ids), "EX", 40 * 3600],
-                ])
-                # also count fires
-                await bench_touch(client, ids, bad=None)
-    except Exception:
-        pass
-    return result, status
 
 # Close loop on outcome
 _prev_on_outcome3 = globals().get("on_outcome_for_si")
 
-async def on_outcome_for_si(client, mint: str, bad_outcome: bool):
-    if _prev_on_outcome3:
-        try:
-            await _prev_on_outcome3(client, mint, bad_outcome)
-        except Exception:
-            pass
-    try:
-        raw = await redis_get(client, f"prerug:pending:{mint}")
-        if raw:
-            ids = json.loads(raw)
-            # outcome-labeled update (separate from fire count)
-            if PRED_ENABLED and ids:
-                cmds = []
-                for pid in ids:
-                    cmds.append(["HINCRBY", BENCH_KEY, f"{pid}:labeled_n", 1])
-                    if bad_outcome:
-                        cmds.append(["HINCRBY", BENCH_KEY, f"{pid}:labeled_bad", 1])
-                cmds.append(["DEL", f"prerug:pending:{mint}"])
-                cmds.append(["EXPIRE", BENCH_KEY, BENCH_TTL])
-                await redis_pipe(client, cmds)
-    except Exception:
-        pass
 
 # =========================
 # 3) Omni packaging (single story)
@@ -6495,7 +5638,6 @@ def _register_product_mcp():
         print(f"[part76] mcp skip: {e}")
 
 try:
-    import asyncio as _aio
     _aio.get_event_loop().call_later(5, _register_product_mcp)
 except Exception:
     _register_product_mcp()
@@ -6504,15 +5646,9 @@ print(f"[part76] v{VERSION} autonomic + prerug benchmark + omni packaging loaded
 
 # --- part77 ---
 # ---------- v2.56: Autonomic Breath (reliable seed + focus loop) ----------
-VERSION = "2.56.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import asyncio
-import json
-import os
-import time
-from typing import Any, Dict, List, Optional
 
 # ---- knobs (env) ----
 BREATH_ENABLED = os.getenv("SI_BREATH", "true").lower() in ("1", "true", "yes")
@@ -6727,29 +5863,15 @@ async def si_breath_status(request: Request):
 # Opportunistic breath on traffic (rate-limited)
 _build_prev_breath = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    global _last_breath
-    result, status = await _build_prev_breath(client, mint, security, prefetched)
-    try:
-        now = time.time()
-        if BREATH_ENABLED and now - _last_breath >= BREATH_EVERY_S:
-            _last_breath = now
-            await breath_once(client)
-    except Exception:
-        pass
-    return result, status
 
 print(f"[part77] v{VERSION} Autonomic Breath loaded → POST+GET /si/breath · GET /si/breath/status")
 
 # --- part78 ---
 # ---------- v2.57: Evidence discipline (unknowns + verdict cap + untrusted text) ----------
-VERSION = "2.57.0"
 app.version = VERSION
 app.openapi_schema = None
 
 import copy
-import os
-import re
 from typing import Any, Dict, List
 
 # ---- knobs (env) ----
@@ -6922,28 +6044,13 @@ def _apply_discipline(result: dict) -> dict:
 _build_prev_discipline = build_signal
 
 
-async def build_signal(client, mint, security, *args, **kwargs):
-    res = await _build_prev_discipline(client, mint, security, *args, **kwargs)
-    try:
-        if isinstance(res, tuple) and len(res) == 2 and isinstance(res[0], dict):
-            return _apply_discipline(res[0]), res[1]
-        if isinstance(res, dict):
-            return _apply_discipline(res)
-    except Exception:
-        pass  # không để lớp kỷ luật làm hỏng response
-    return res
-
-
 print(f"[part78] v{VERSION} evidence discipline loaded (unknowns, verdict cap={UNKNOWN_CAP}, sanitize={SANITIZE_TEXT})")
 
 # --- part79 ---
 # ---------- v2.58: Flag evidence labels (observation vs inference) ----------
-VERSION = "2.58.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import os
-from typing import Any, Dict, List
 
 FLAG_LABELS = os.getenv("SI_FLAG_LABELS", "true").lower() in ("1", "true", "yes")
 
@@ -6976,19 +6083,6 @@ def _flag_id(f: Any) -> str:
             if isinstance(f.get(k), str):
                 return f[k]
     return ""
-
-
-def _flag_kind(fid: str) -> str:
-    x = fid.lower()
-    if "unverified" in x or "unknown" in x:
-        return "unknown"  # khoảng trống bằng chứng, không phải một phát hiện
-    if x in _OBS_EXACT or x.startswith(_OBS_PREFIX):
-        return "observation"
-    if any(p in x for p in _INF_PARTS):
-        return "inference"
-    if any(p in x for p in _OBS_PARTS):
-        return "observation"
-    return "inference"  # không chắc thì không tự nhận là observation
 
 
 def _label_flags(result: dict) -> dict:
@@ -7024,30 +6118,13 @@ def _label_flags(result: dict) -> dict:
 _build_prev_labels = build_signal
 
 
-async def build_signal(client, mint, security, *args, **kwargs):
-    res = await _build_prev_labels(client, mint, security, *args, **kwargs)
-    if not FLAG_LABELS:
-        return res
-    try:
-        if isinstance(res, tuple) and len(res) == 2 and isinstance(res[0], dict):
-            return _label_flags(res[0]), res[1]
-        if isinstance(res, dict):
-            return _label_flags(res)
-    except Exception:
-        pass
-    return res
-
-
 print(f"[part79] v{VERSION} flag evidence labels loaded (enabled={FLAG_LABELS})")
 
 # --- part80 ---
 # ---------- v2.59: Snapshot diff (/diff) ----------
-VERSION = "2.59.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import time
-from typing import Any, Dict, List, Optional
 
 from fastapi import Query
 
@@ -7194,82 +6271,6 @@ def _brief(s: dict, mint: str) -> Dict[str, Any]:
     }
 
 
-async def compute_diff(client, mint: str, from_ts: Optional[int] = None, to_ts: Optional[int] = None,
-                       since_h: Optional[float] = None) -> Dict[str, Any]:
-    """Dùng chung cho route /diff và tool MCP get_diff. Ném HTTPException khi lỗi."""
-    if not MINT_RE.match(mint):
-        raise HTTPException(status_code=400, detail="Invalid Solana token address")
-    if not PRED_ENABLED:
-        raise HTTPException(status_code=503, detail="Snapshot store is not enabled")
-
-    ts_list = await _list_snapshot_ts(client, mint)
-    if len(ts_list) < 2:
-        dbg: Dict[str, Any] = {}
-        try:
-            zkey = SNAPSHOTS_ZSET.format(mint)
-            r2 = await redis_pipe(client, [["ZCARD", zkey], ["ZREVRANGE", zkey, 0, 2]])
-            dbg = {
-                "index_key": zkey,
-                "index_size": (r2 or [None])[0],
-                "index_sample": [repr(m)[:80] for m in ((r2 or [None, []])[1] or [])],
-            }
-        except Exception as e:
-            dbg = {"index_error": repr(e)[:120]}
-        raise HTTPException(status_code=404, detail={
-            "error": "Fewer than two snapshots stored for this token",
-            "available_snapshots": len(ts_list),
-            "hint": "Query /signal for this mint again later; each signal pull stores a snapshot.",
-            "debug": dbg,
-        })
-
-    new_ts = _nearest(ts_list, to_ts) if to_ts is not None else ts_list[0]
-    if from_ts is not None:
-        old_ts = _nearest(ts_list, from_ts)
-    elif since_h is not None:
-        old_ts = _nearest([t for t in ts_list if t != new_ts] or ts_list, new_ts - int(since_h * 3600))
-    else:
-        old_ts = next((t for t in ts_list if t < new_ts), ts_list[-1])
-    if old_ts == new_ts:
-        raise HTTPException(status_code=422, detail="Need two different snapshots; widen from/to or since_h")
-    if old_ts > new_ts:
-        old_ts, new_ts = new_ts, old_ts
-
-    a = await _load_snapshot(client, mint, old_ts)
-    b = await _load_snapshot(client, mint, new_ts)
-    if not a or not b:
-        raise HTTPException(status_code=404, detail="A snapshot listed in the index could not be loaded (expired or missing)")
-
-    changes = _diff_snaps(a, b)
-    gap = new_ts - old_ts
-    unknowns = [{
-        "id": "between_snapshots",
-        "detail": "Only two points are compared. Absence of a change here does not mean nothing changed in between.",
-    }]
-    if gap > 24 * 3600:
-        unknowns.append({"id": "wide_gap", "detail": f"The snapshots are {gap / 3600:.1f} hours apart."})
-
-    out = {
-        "mint": mint,
-        "gap_s": gap,
-        "gap_h": round(gap / 3600, 2),
-        "available_snapshots": len(ts_list),
-        "from": _brief(a, mint),
-        "to": _brief(b, mint),
-        "changes": changes,
-        "changes_kind": "observation",
-        "notes": _diff_notes(changes),
-        "unknowns": unknowns,
-        "generated_at": int(time.time()),
-    }
-    walker = globals().get("_walk_text")
-    if callable(walker):
-        try:
-            walker(out, {})
-        except Exception:
-            pass
-    return out
-
-
 @app.get("/diff", tags=["signals"],
          summary="What changed for a token between two stored snapshots",
          description="Compares two stored snapshots. `changes` are measured field differences (observations). "
@@ -7293,12 +6294,9 @@ print(f"[part80] v{VERSION} snapshot diff loaded → GET /diff?mint=&since_h=")
 
 # --- part81 ---
 # ---------- v2.60: Omni-first agent packaging ----------
-VERSION = "2.60.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import os
-from fastapi.responses import HTMLResponse, PlainTextResponse
 
 BASE = os.getenv("PUBLIC_BASE_URL", "https://signal-api-24q4.onrender.com").rstrip("/")
 
@@ -7388,12 +6386,9 @@ print(f"[part81] v{VERSION} Omni-first packaging → /llms.txt /agents")
 
 # --- part82 ---
 # ---------- v2.61: Daily journal + prerug bench public (labeled) ----------
-VERSION = "2.61.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
 from typing import Any, Dict, Optional
 
 BENCH_KEY = "prerug:bench"
@@ -7445,44 +6440,6 @@ async def prerug_bench_public(client) -> Dict[str, Any]:
 async def benchmark_prerug_v2(request: Request):
     return await prerug_bench_public(request.app.state.client)
 
-async def maybe_daily_journal(client) -> Optional[dict]:
-    if not PRED_ENABLED or not client:
-        return None
-    day = time.strftime("%Y-%m-%d", time.gmtime())
-    marker = f"si:journal:day:{day}"
-    try:
-        if await redis_get(client, marker):
-            return None
-        breath_n = 0
-        try:
-            breath_n = int(await redis_get(client, f"si:breath:day:{time.strftime('%Y%m%d', time.gmtime())}") or 0)
-        except Exception:
-            pass
-        mood, regime = "observing", "unknown"
-        try:
-            raw = await redis_get(client, "si:entity:core")
-            if raw:
-                ent = json.loads(raw)
-                mood = ent.get("mood") or mood
-                regime = ((ent.get("stats") or {}).get("regime")) or regime
-        except Exception:
-            pass
-        bench = await prerug_bench_public(client)
-        ready = sum(1 for p in (bench.get("patterns") or {}).values() if p.get("ready"))
-        line = (
-            f"Day log {day}: breath_pulls={breath_n}, mood={mood}, regime={regime}, "
-            f"prerug_patterns_ready={ready}."
-        )
-        entry = {"ts": int(time.time()), "day": day, "line": line, "meta": {"source": "daily_auto"}}
-        await redis_pipe(client, [
-            ["SET", marker, "1", "EX", 3 * 86400],
-            ["LPUSH", JOURNAL_KEY, json.dumps(entry, separators=(",", ":"))],
-            ["LTRIM", JOURNAL_KEY, 0, 89],
-            ["EXPIRE", JOURNAL_KEY, 180 * 86400],
-        ])
-        return entry
-    except Exception:
-        return None
 
 _prev_breath = globals().get("breath_once")
 if callable(_prev_breath):
@@ -7501,28 +6458,15 @@ async def force_daily_journal(request: Request):
 
 _build_prev_82 = build_signal
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_82(client, mint, security, prefetched)
-    try:
-        await maybe_daily_journal(client)
-    except Exception:
-        pass
-    return result, status
 
 print(f"[part82] v{VERSION} daily journal + prerug bench public loaded")
 
 # --- part83 ---
 # ---------- v2.62: Fixes from live test ----------
-VERSION = "2.62.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import asyncio
 import hmac
-import math
-import os
-import time
-from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -7539,52 +6483,7 @@ def _drop_route(path: str, method: str) -> None:
 _NUM = (int, float)
 
 
-def _fix_missing(r: Any) -> Any:
-    if not isinstance(r, dict):
-        return r
-    r = dict(r)
-    added = []
-    t = r.get("top10_holders_pct")
-    if isinstance(t, _NUM) and not isinstance(t, bool) and t <= 0:
-        r["top10_holders_pct"] = None
-        added.append("top10_holders_pct")
-    if r.get("asset_class") == "major" and r.get("lp_locked_pct") == 0:
-        r["lp_locked_pct"] = None  # LP lock is not meaningful for SOL/USDC/USDT
-    pos = r.get("positives")
-    if added and isinstance(pos, list):
-        r["positives"] = [p for p in pos if "top 10 holders" not in str(p).lower()]
-    if added:
-        dq = dict(r.get("data_quality") or {})
-        dq["missing"] = sorted(set(list(dq.get("missing") or []) + added))
-        dq["completeness"] = "partial"
-        try:
-            dq["data_confidence"] = min(float(dq.get("data_confidence", 1.0)), 0.7)
-        except Exception:
-            dq["data_confidence"] = 0.7
-        r["data_quality"] = dq
-        dec = r.get("decision")
-        if isinstance(dec, dict):
-            dec = dict(dec)
-            unk = list(dec.get("unknowns") or [])
-            unk.append("Top-10 holder share was not available (reported as unknown, not 0%)")
-            dec["unknowns"] = unk
-            r["decision"] = dec
-    return r
-
-
 _build_prev_83 = build_signal
-
-
-async def build_signal(client, mint, security, *args, **kwargs):
-    res = await _build_prev_83(client, mint, security, *args, **kwargs)
-    try:
-        if isinstance(res, tuple) and len(res) == 2 and isinstance(res[0], dict):
-            return _fix_missing(res[0]), res[1]
-        if isinstance(res, dict):
-            return _fix_missing(res)
-    except Exception:
-        pass
-    return res
 
 
 # ===== 2. Flag classifier: use the real flag names seen in /track_record =====
@@ -7760,7 +6659,6 @@ print(f"[part83] v{VERSION} live-test fixes loaded")
 
 # --- part84 ---
 # ---------- v2.62.1: fix at the source + force benchmark route ----------
-VERSION = "2.62.1"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -7854,11 +6752,9 @@ print(f"[part84] v{VERSION} source fix (top10) + nested security + prerug overri
 
 # --- part85 ---
 # ---------- v2.63: Attention Residual Fusion (AttnRes-style layer weights) ----------
-VERSION = "2.63.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import math
 from typing import Any, Dict, List, Optional, Tuple
 
 # Softmax temperature: lower = sharper focus on strongest layer
@@ -8051,16 +6947,6 @@ def attach_attention_residuals(result: dict) -> dict:
 _build_prev_res = build_signal
 
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_res(client, mint, security, prefetched)
-    try:
-        if isinstance(result, dict):
-            result = attach_attention_residuals(result)
-    except Exception:
-        pass
-    return result, status
-
-
 # If omni wrapper exists, enrich after it
 _omni_prev = globals().get("omni_packet") or globals().get("build_omni")
 if callable(_omni_prev):
@@ -8094,13 +6980,9 @@ print(f"[part85] v{VERSION} Attention Residual Fusion loaded → signal/omni + G
 
 # --- part86 ---
 # ---------- v2.64: Residual outcome learning (did AttnRes beat base?) ----------
-VERSION = "2.64.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
-from typing import Any, Dict, Optional
 
 RES_LEARN_KEY = "si:res:learn"          # hash: right_base, right_res, n, ...
 RES_PENDING = "si:res:pending:{}"       # pending residual snapshot per mint
@@ -8223,45 +7105,17 @@ async def residuals_stats(request: Request):
 _build_prev_reslearn = build_signal
 
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_reslearn(client, mint, security, prefetched)
-    try:
-        if isinstance(result, dict) and result.get("attention_residuals"):
-            await _res_learn_record_pending(client, mint, result)
-    except Exception:
-        pass
-    return result, status
-
-
 # Hook outcome path
 _prev_outcome_res = globals().get("on_outcome_for_si")
-
-
-async def on_outcome_for_si(client, mint: str, bad: bool, meta: Optional[dict] = None, **kwargs):
-    if callable(_prev_outcome_res):
-        try:
-            await _prev_outcome_res(client, mint, bad, meta, **kwargs)
-        except TypeError:
-            try:
-                await _prev_outcome_res(client, mint, bad, meta)
-            except Exception:
-                pass
-        except Exception:
-            pass
-    await residual_on_outcome(client, mint, bad, meta)
 
 
 print(f"[part86] v{VERSION} Residual outcome learning → /residuals/stats + on_outcome_for_si")
 
 # --- part87 ---
 # ---------- v2.65: Pre-rug pattern labeled outcomes ----------
-VERSION = "2.65.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
-from typing import Any, Dict, List, Optional
 
 PRERUG_FIRE_KEY = "prerug:fire:{}"      # mint → json list of pattern ids at fire time
 PRERUG_FIRE_TTL = 10 * 86400
@@ -8330,34 +7184,8 @@ async def prerug_on_outcome(client, mint: str, bad: bool, meta: Optional[dict] =
 _build_prev_prerug = build_signal
 
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_prerug(client, mint, security, prefetched)
-    try:
-        if isinstance(result, dict):
-            pr = result.get("pre_rug") or []
-            if pr:
-                await prerug_record_fire(client, mint, pr if isinstance(pr, list) else [pr])
-    except Exception:
-        pass
-    return result, status
-
-
 # Chain outcome hook
 _prev_outcome_pr = globals().get("on_outcome_for_si")
-
-
-async def on_outcome_for_si(client, mint: str, bad: bool, meta: Optional[dict] = None, **kwargs):
-    if callable(_prev_outcome_pr):
-        try:
-            await _prev_outcome_pr(client, mint, bad, meta, **kwargs)
-        except TypeError:
-            try:
-                await _prev_outcome_pr(client, mint, bad, meta)
-            except Exception:
-                pass
-        except Exception:
-            pass
-    await prerug_on_outcome(client, mint, bad, meta)
 
 
 @app.get("/benchmark/prerug/status", tags=["product"])
@@ -8381,13 +7209,9 @@ print(f"[part87] v{VERSION} Pre-rug labeled outcomes → fire on signal + label 
 
 # --- part88 ---
 # ---------- v2.66: Surface residuals + offline export in product/llms ----------
-VERSION = "2.66.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
-from typing import Any, Dict, List, Optional
 
 # ---- enrich /product ----
 _product_prev = globals().get("product_payload")
@@ -8477,13 +7301,9 @@ print(f"[part88] v{VERSION} product + llms residual surface")
 
 # --- part89 ---
 # ---------- v2.67: Offline feature export (JSONL) for LightGBM later ----------
-VERSION = "2.67.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
-from typing import Any, Dict, List, Optional
 
 EXPORT_BUF = "si:export:buf"       # list of recent feature rows
 EXPORT_MAX = 2000
@@ -8531,18 +7351,6 @@ async def _export_push(client, row: dict) -> None:
 _build_prev_exp = build_signal
 
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_exp(client, mint, security, prefetched)
-    try:
-        if isinstance(result, dict):
-            row = _feature_row(mint, result)
-            if row:
-                await _export_push(client, row)
-    except Exception:
-        pass
-    return result, status
-
-
 @app.get("/export/features", tags=["operator"], include_in_schema=False)
 async def export_features(request: Request, limit: int = 200):
     """
@@ -8582,14 +7390,9 @@ Adds NO field to API responses and changes NO verdict. It only records
 extra signals to Redis so the track record can measure them first.
 Switches (env, default on): SHADOW_ENABLED, SHADOW_PRICE, SHADOW_PUMP, SHADOW_HOLDER
 """
-VERSION = "2.68.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import asyncio
-import json
-import os
-import time
 
 SHADOW_BUF = "si:shadow:buf"
 SHADOW_MAX = 2000
@@ -8770,22 +7573,6 @@ async def _shadow_run(client, mint, result):
 _build_prev_shadow = build_signal
 
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_shadow(client, mint, security, prefetched)
-    try:
-        if (client and isinstance(result, dict) and _sh_on("SHADOW_ENABLED")
-                and time.time() - _SH_SEEN.get(mint, 0) > 30):
-            _SH_SEEN[mint] = time.time()
-            if len(_SH_SEEN) > 3000:
-                _SH_SEEN.clear()
-            t = asyncio.create_task(_shadow_run(client, mint, result))
-            _SH_TASKS.add(t)
-            t.add_done_callback(_SH_TASKS.discard)
-    except Exception:
-        pass
-    return result, status
-
-
 @app.get("/shadow/status", tags=["operator"], include_in_schema=False)
 async def shadow_status(request: Request, limit: int = 50):
     gate = globals().get("require_operator") or globals().get("soft_gate_operator")
@@ -8815,12 +7602,8 @@ print(f"[part90] v{VERSION} shadow signals (price cross-check, pump.fun, holder)
 
 # --- part91 ---
 # ---------- v2.69: Seed cohort stats (selection-bias panel) ----------
-VERSION = "2.69.0"
 app.version = VERSION
 app.openapi_schema = None
-
-import math
-from typing import Any, Dict, Optional
 
 
 def _cohort_rates(block: dict) -> dict:
@@ -8928,11 +7711,8 @@ print(f"[part91] v{VERSION} selection-bias panel → GET /stats/bias (+ /stats.s
 
 # --- part92 ---
 # ---------- v2.70: Multi-horizon accuracy surface ----------
-VERSION = "2.70.0"
 app.version = VERSION
 app.openapi_schema = None
-
-from typing import Any, Dict, List
 
 
 def build_horizons_panel(stats: dict) -> dict:
@@ -9040,9 +7820,6 @@ VERSION = "2.71.1"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
-import time
-from typing import Any, Dict, List, Optional
 
 SHADOW_AVOID_KEY = "si:shadow:avoid_rules"
 SHADOW_AVOID_PENDING = "si:shadow:avoid_pending:{}"
@@ -9196,3 +7973,5 @@ async def stats_shadow_avoid(request: Request):
 
 
 print(f"[part93] v{VERSION} shadow avoid-recall (1 command per repeat query) -> signal.shadow_avoid + GET /stats/shadow-avoid")
+
+# --- slim: VERSION unified (kept last value) ---

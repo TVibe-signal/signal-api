@@ -7,7 +7,6 @@ Source: https://github.com/TVibe-signal/signal-api
 
 # --- part94 ---
 # ---------- v2.72: Agent snippets + SI noise reduction ----------
-VERSION = "2.72.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -89,21 +88,10 @@ def _si_quiet(result: dict) -> dict:
 _build_prev_quiet = build_signal
 
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_quiet(client, mint, security, prefetched)
-    try:
-        if isinstance(result, dict):
-            result = _si_quiet(result)
-    except Exception:
-        pass
-    return result, status
-
-
 print(f"[part94] v{VERSION} agent snippets + si_reading_order → /agents/snippets")
 
 # --- part95 ---
 # ---------- v2.73: Self-serve key request (beta) + upstream RL status ----------
-VERSION = "2.73.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -209,16 +197,11 @@ print(f"[part95] v{VERSION} POST /keys/request · GET /upstream/status")
 - POST /keys/request: per-IP limit (3/hour), honest storage errors
 - decision_confidence: heuristic level from data completeness + source health
 """
-VERSION = "2.74.0"
 app.version = VERSION
 app.openapi_schema = None
 
 import asyncio
-import hashlib
-import json
 import math
-import os
-import time
 
 from fastapi.responses import JSONResponse
 
@@ -260,7 +243,6 @@ async def _internal_get(path, ttl=15):
         return hit[1]
     data = {}
     try:
-        import httpx
         tr = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=tr, base_url="http://internal", timeout=8) as c:
             r = await c.get(path)
@@ -500,19 +482,6 @@ def _confidence(result):
 _build_prev_p96 = build_signal
 
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_p96(client, mint, security, prefetched)
-    try:
-        if isinstance(result, dict):
-            result["decision_confidence"] = _confidence(result)
-            order = result.get("si_reading_order")
-            if isinstance(order, dict) and "decision_confidence" not in order.get("primary", []):
-                order.setdefault("primary", []).append("decision_confidence")
-    except Exception:
-        pass
-    return result, status
-
-
 print(f"[part96] v{VERSION} calibration fixes: shadow-avoid recall/CI, real stats+health readers, key limit, confidence")
 
 # --- part97 ---
@@ -524,11 +493,9 @@ A small middleware post-processes GET /stats (original body is returned if anyth
 - adds base_rate (+ lift_vs_base), rule_comparison_24h, selection_bias
 Needs part96 (wilson, _pct) loaded first.
 """
-VERSION = "2.75.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import json
 
 from fastapi.responses import Response
 
@@ -693,15 +660,9 @@ Env (all optional): P98_ENABLED, P98_LIMIT, P98_COALESCE (default on; 0/off/fals
 P98_DEX_RPM=240, P98_DEX_PROF_RPM=48, P98_GECKO_RPM=24, P98_PUMP_RPM=60, P98_MAX_WAIT_MS=1200
 Limits sit at about 80% of the published ones (Dex 300/60, Gecko 30 per minute).
 """
-VERSION = "2.76.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import asyncio
-import os
-import time
-
-import httpx
 
 _P98_T0 = time.time()
 _P98_HOSTS = {"api.dexscreener.com", "api.geckoterminal.com", "frontend-api-v3.pump.fun",
@@ -870,12 +831,9 @@ Turns the track record into per-signal reasoning, using only what the data shows
 - reading: a short grounded text agents can quote
 - GET /calibration shows the whole table. Needs part96 (wilson, _internal_get, _P96_TASKS).
 """
-VERSION = "2.77.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import asyncio
-import time
 
 _P99 = {"model": None, "ts": 0.0, "tried": 0.0}
 
@@ -995,33 +953,6 @@ def _p99_reading(score, verdict, cal, ev, m, conf):
 _build_prev_p99 = build_signal
 
 
-async def build_signal(client, mint, security, prefetched=None):
-    result, status = await _build_prev_p99(client, mint, security, prefetched)
-    try:
-        if isinstance(result, dict):
-            m = _p99_cached()
-            if not m:
-                result["calibration_status"] = "warming_up"
-            else:
-                score = float(result.get("risk_score") or 0)
-                verdict = (((result.get("decision") or {}).get("verdict")) or result.get("verdict") or "").lower()
-                cal = _p99_calibrate(score, m)
-                ev = _p99_evidence(result.get("flags") or [], m)
-                result["calibrated_risk"] = cal
-                result["evidence"] = ev
-                result["bad_rate_by_horizon"] = m["horizons"].get(verdict)
-                result["reading"] = _p99_reading(score, verdict, cal, ev, m, result.get("decision_confidence"))
-                order = result.get("si_reading_order")
-                if isinstance(order, dict):
-                    pr = order.setdefault("primary", [])
-                    for k in ("calibrated_risk", "reading"):
-                        if k not in pr:
-                            pr.append(k)
-    except Exception as e:
-        print(f"[part99] {str(e)[:80]}")
-    return result, status
-
-
 @app.get("/calibration", tags=["accuracy"])
 async def calibration():
     m = await _p99_refresh() or {}
@@ -1043,13 +974,9 @@ print(f"[part99] v{VERSION} calibrated_risk + evidence + reading -> GET /calibra
 #    - a failed/untrusted DexScreener answer NEVER becomes "bad": it is retried instead
 #    - set P100_WIRE=0 to switch B off (use that if /stats/shadow-avoid judged already grows)
 # C: fair-use copy on /support + /donate (free instance; optional SOL tips)
-VERSION = "2.78.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import asyncio
-import os
-import time
 from typing import Dict, Optional
 
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -1111,92 +1038,6 @@ async def _p100_fetch(client, mints, sol) -> Optional[Dict[str, Optional[dict]]]
 
 
 _prev_resolve_due = resolve_due
-
-
-async def resolve_due(client: "httpx.AsyncClient") -> int:
-    if not P100_WIRE:
-        return await _prev_resolve_due(client)
-    snaps = []
-    try:
-        batch = int(globals().get("RESOLVE_BATCH") or 20)
-        lim = min(max(batch * 2, 60), 150)
-        got = await redis_pipe(client, [["ZRANGEBYSCORE", "due", "-inf", int(time.time()), "LIMIT", 0, lim]])
-        ids = (got or [[]])[0] or []
-        if ids:
-            hashes = await redis_pipe(client, [["HGETALL", f"pred:{i}"] for i in ids])
-            for i, h in zip(ids, hashes or []):
-                d = to_dict(h)
-                if d.get("mint"):
-                    d["_id"] = i
-                    snaps.append(d)
-    except Exception as e:
-        print(f"[part100] pre-resolve snap: {e}")
-
-    n = await _prev_resolve_due(client)
-
-    try:
-        work = [(d, 0) for d in snaps]
-        if snaps:  # keep only what the core resolver really took out of "due"
-            left = await redis_pipe(client, [["ZSCORE", "due", d["_id"]] for d in snaps])
-            if left and len(left) == len(snaps):
-                work = [(d, 0) for d, z in zip(snaps, left) if _p100_val(z) is None]
-            else:
-                work = []
-        work += _P100_RETRY
-        _P100_RETRY.clear()
-        if not work:
-            return n
-
-        horizon = int(globals().get("PRED_HORIZON_S") or 86400)
-        now = int(time.time())
-        work = [(d, a) for d, a in work if now - int(d.get("ts") or 0) <= horizon * 3]
-        mints = sorted({d["mint"] for d, _ in work})
-        if not mints:
-            return n
-        best = await _p100_fetch(client, mints, globals().get("SOL_MINT") or _SOL_DEFAULT)
-        if best is None:
-            for d, a in work:
-                if a < 5 and len(_P100_RETRY) < 300:
-                    _P100_RETRY.append((d, a + 1))
-            print(f"[part100] label fetch untrusted, {len(work)} snapshot(s) queued for retry")
-            return n
-
-        bad_ret = float(globals().get("BAD_RETURN_PCT") or -50)
-        bad_liq = float(globals().get("BAD_LIQ_RATIO") or 0.3)
-        fn = globals().get("on_outcome_for_si")
-        sa = globals().get("shadow_avoid_on_outcome")
-        for d, _ in work:
-            mint = d["mint"]
-            guard = await redis_pipe(client, [["SET", f"si:lab:{d['_id']}", 1, "NX", "EX", _P100_LABEL_TTL]])
-            if not (guard and _p100_val(guard[0])):
-                continue  # this prediction was already labelled
-            p0, l0 = float(d.get("price") or 0), float(d.get("liq") or 0)
-            pair = best.get(mint)
-            if pair is None:
-                ret, liq_ratio = -100.0, 0.0
-            else:
-                try:
-                    p1 = float(pair.get("priceUsd") or 0)
-                    l1 = float((pair.get("liquidity") or {}).get("usd") or 0)
-                except (TypeError, ValueError):
-                    p1, l1 = 0.0, 0.0
-                ret = (p1 / p0 - 1) * 100 if p0 > 0 else 0.0
-                liq_ratio = l1 / l0 if l0 > 0 else 1.0
-            bad = bool(ret <= bad_ret or liq_ratio <= bad_liq)
-            meta = {"source": "part100_resolve"}
-            try:
-                if callable(fn):  # part93 wrapper already calls shadow_avoid_on_outcome
-                    try:
-                        await fn(client, mint, bad, meta)
-                    except TypeError:
-                        await fn(client, mint, bad)
-                elif callable(sa):
-                    await sa(client, mint, bad, meta)
-            except Exception as e:
-                print(f"[part100] outcome hook: {e}")
-    except Exception as e:
-        print(f"[part100] post-resolve labels: {e}")
-    return n
 
 
 # ---------------------------------------------------------------------------
@@ -1313,14 +1154,11 @@ print(f"[part100] v{VERSION} resolve_due→on_outcome (wire={'on' if P100_WIRE e
 # Works without touching the page code: a middleware injects it into the HTML.
 # If anything fails the original page is returned unchanged. DONATE_BANNER=0 turns it off.
 # Needs part100 (DONATE_SOL).
-VERSION = "2.79.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import os
 import re
 
-from fastapi.responses import Response
 
 _P101_ON = os.environ.get("DONATE_BANNER", "1").lower() not in ("0", "false", "off")
 _P101_PATHS = {p.strip() for p in os.environ.get("DONATE_BANNER_PATHS", "/").split(",") if p.strip()}
@@ -1389,14 +1227,9 @@ print(f"[part101] v{VERSION} donate banner on {sorted(_P101_PATHS)} (on={_P101_O
 # A middleware adds favicon/share tags, a header logo, soft animated background, scroll
 # reveal, number count-up and hover polish to HTML pages. Any failure returns the original page.
 # Env: P102_ON=0 turns it off, P102_SKIP="/docs,/redoc" lists pages left untouched, BRAND_DIR=path
-VERSION = "2.80.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import os
-import re
-
-from fastapi.responses import Response
 
 _P102_ON = os.environ.get("P102_ON", "1").lower() not in ("0", "false", "off")
 _P102_SKIP = {p.strip() for p in os.environ.get("P102_SKIP", "/docs,/redoc").split(",") if p.strip()}
@@ -1602,11 +1435,9 @@ print(f"[part102] v{VERSION} brand+motion (on={_P102_ON}) logo files: "
 
 # --- part103 ---
 # ---------- v2.82: Agent-first home + donate + fair-use (complete) ----------
-VERSION = "2.82.0"
 app.version = VERSION
 app.openapi_schema = None
 
-from fastapi.responses import HTMLResponse, PlainTextResponse
 
 DONATE_SOL = "3iAVBvE4aU4A5DTKCqzu6jg79UfW6aEnqUD1pjfew18n"
 BASE = "https://signal-api-24q4.onrender.com"
@@ -1900,11 +1731,9 @@ print(f"[part103] v{{VERSION}} home+donate+support → GET / · /donate · /supp
 
 # --- part104 ---
 # ---------- v2.84: TVibe home - X link, inline mint check (no raw JSON), color-coded result ----------
-VERSION = "2.87.0"
 app.version = VERSION
 app.openapi_schema = None
 
-from fastapi.responses import HTMLResponse, PlainTextResponse
 
 BRAND = "TVibe Signal"
 DONATE_SOL = "3iAVBvE4aU4A5DTKCqzu6jg79UfW6aEnqUD1pjfew18n"
@@ -2745,17 +2574,10 @@ print(f"[part104] v{VERSION} {BRAND} home + market data from /signal + track rec
 # v2.88.1: also keeps decision.verdict consistent with a capped verdict (see _normalize).
 # Needs: `cryptography` in requirements.txt, Upstash Redis env vars (or ATTEST_SECRET).
 # Loader line (after part104, before part7):  ("part105.py", 0, "SKIP"),
-import asyncio
 import base64
 import datetime
-import hashlib
-import json
-import os
-import re
-import time
 import types
 
-VERSION = "2.88.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -2788,10 +2610,6 @@ def _canon(o):
     return json.dumps(o, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
 
 
-def _day(ts):
-    return datetime.datetime.fromtimestamp(ts, datetime.timezone.utc).strftime("%Y-%m-%d")
-
-
 def _err(e):
     # never leak RPC / Redis URLs (they can contain API keys)
     return re.sub(r"https?://\S+", "<url>", str(e))[:200]
@@ -2820,7 +2638,6 @@ async def _redis(cmds):
     cfg = _redis_cfg()
     if not cfg:
         return None
-    import httpx
     async with httpx.AsyncClient(timeout=6) as c:
         r = await c.post(cfg[0] + "/pipeline", headers={"Authorization": "Bearer " + cfg[1]}, json=cmds)
         r.raise_for_status()
@@ -2862,43 +2679,6 @@ def _init_signer(seed):
 
 class _Cfg(Exception):
     pass
-
-
-async def _load():
-    if S.loaded or time.time() < S.next_load:
-        return
-    async with _lock:
-        if S.loaded or time.time() < S.next_load:
-            return
-        try:
-            env_secret = os.environ.get("ATTEST_SECRET")
-            if env_secret:
-                seed = base64.b64decode(env_secret)
-            elif _redis_cfg():
-                r = await _redis([["GET", "tv:attest:seed"]])
-                if not r[0]:
-                    await _redis([["SET", "tv:attest:seed", base64.b64encode(os.urandom(32)).decode(), "NX"]])
-                    r = await _redis([["GET", "tv:attest:seed"]])
-                seed = base64.b64decode(r[0])
-            else:
-                raise _Cfg("needs Upstash Redis env vars or ATTEST_SECRET")
-            _init_signer(seed)
-            if _redis_cfg():
-                res = await _redis([["GET", "tv:attest:state"], ["HGETALL", "tv:attest:closing"],
-                                    ["HGETALL", "tv:attest:anchors"]])
-                st = json.loads(res[0]) if res[0] else {}
-                S.head = st.get("head", _GENESIS)
-                S.n = st.get("n", 0)
-                S.day = st.get("day", "")
-                S.day_n = st.get("day_n", 0)
-                S.closing = {k: json.loads(v) for k, v in _pairs(res[1])}
-                S.anchors = {k: json.loads(v) for k, v in _pairs(res[2])}
-                S.persistent = True
-            S.ok, S.reason, S.loaded = True, "ok", True
-        except (_Cfg, RuntimeError, ValueError) as e:
-            S.ok, S.reason, S.loaded = False, _err(e), True
-        except Exception as e:  # transient (network, Redis): retry soon
-            S.ok, S.reason, S.next_load = False, _err(e), time.time() + 30
 
 
 # ---------------------------------------------------------------- chain
@@ -2970,7 +2750,6 @@ def _rpc_url():
 
 
 async def _rpc(method, params):
-    import httpx
     async with httpx.AsyncClient(timeout=15) as c:
         r = await c.post(_rpc_url(), json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params})
         r.raise_for_status()
@@ -3294,7 +3073,6 @@ except NameError:
 # Loader line (after part105/part106, before part7):  ("part107.py", 0, "SKIP"),
 from fastapi.responses import HTMLResponse
 
-VERSION = "2.89.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -3464,12 +3242,10 @@ except NameError:
 #   - pick_best_pair errors fall back to the highest-liquidity pair instead of failing every token
 #   - snapshots with no usable start price AND no start liquidity are skipped (cannot be judged)
 #   - each snapshot is labelled at most once; callbacks are called once (no blind retry on TypeError)
-VERSION = "2.90.1"
 app.version = VERSION
 app.openapi_schema = None
 
 import inspect
-import time
 from typing import Any, Dict, List, Optional
 
 _prev_resolve_108 = resolve_due
@@ -3641,43 +3417,13 @@ def _survival_note(r: dict) -> Optional[dict]:
 _build_prev_108 = build_signal
 
 
-async def build_signal(client, mint, security, *args, **kwargs):
-    res = await _build_prev_108(client, mint, security, *args, **kwargs)
-    try:
-        r, status = (res[0], res[1]) if isinstance(res, tuple) and len(res) == 2 else (res, "ok")
-        if not isinstance(r, dict):
-            return res
-        dec = r.get("decision")
-        if not isinstance(dec, dict):
-            dec = {}
-            r["decision"] = dec
-        if dec.get("verdict") is None and r.get("verdict"):
-            dec["verdict"] = r["verdict"]
-        if dec.get("risk_score") is None and r.get("risk_score") is not None:
-            dec["risk_score"] = r["risk_score"]
-        vfs = _valid_for_s(r)
-        dec["valid_for_s"] = vfs
-        r["valid_for_s"] = vfs
-        wcm = _would_change(r)
-        r["would_change_my_mind"] = wcm
-        dec["would_change_my_mind"] = wcm
-        if not r.get("survival_meta"):
-            r["survival_meta"] = _survival_note(r)
-        return (r, status) if isinstance(res, tuple) else r
-    except Exception as e:
-        print(f"[part108] honesty wrap: {e}")
-        return res
-
-
 print(f"[part108] v{VERSION} resolve->labels (safe) . valid_for_s . would_change_my_mind")
 
 # --- part109 ---
 # ---------- v2.90: Daily public benchmark snapshot (anonymous counts only) ----------
-VERSION = "2.90.0"
 app.version = VERSION
 app.openapi_schema = None
 
-import time
 from typing import Any, Dict
 
 
@@ -3755,13 +3501,9 @@ print(f"[part109] v{VERSION} GET /benchmark/daily")
 #   - public list needs at least 5 outcomes per wallet (default 10): a wallet labelled "100% bad" on 3 samples is unfair
 #   - the endpoint now shows how many outcomes had NO known deployer, so you can see if this feature records anything.
 #     (part108 passes no deployer, so until a part stores the creator at verdict time this stays empty.)
-VERSION = "2.91.1"
 app.version = VERSION
 app.openapi_schema = None
 
-import inspect
-import json
-import time
 from typing import Any, Dict, Optional
 
 DEP_KEY = "si:shadow:deployer"
@@ -3807,23 +3549,6 @@ async def deployer_shadow_on_outcome(client, mint: str, bad: bool, meta: Optiona
 
 
 _prev_out_110 = globals().get("on_outcome_for_si")
-
-
-async def on_outcome_for_si(client, mint: str, bad: bool, meta: Optional[dict] = None, **kwargs):
-    if callable(_prev_out_110):
-        try:
-            plist = list(inspect.signature(_prev_out_110).parameters.values())
-        except (TypeError, ValueError):
-            plist = []
-        takes_meta = len(plist) >= 4 or any(p.kind == p.VAR_POSITIONAL for p in plist)
-        try:
-            if takes_meta:
-                await _prev_out_110(client, mint, bad, meta, **kwargs)
-            else:
-                await _prev_out_110(client, mint, bad)
-        except Exception as e:
-            print(f"[part110] previous outcome hook: {e}")
-    await deployer_shadow_on_outcome(client, mint, bad, meta)
 
 
 @app.get("/stats/deployer-shadow", tags=["accuracy"])
@@ -3875,7 +3600,6 @@ print(f"[part110] v{VERSION} deployer shadow -> GET /stats/deployer-shadow")
 #   - "\~30" (invalid escape, SyntaxWarning) -> "~30"
 #   - GitHub link matched to the one on the home page (TVibex402)
 #   - mentions /verify and the attestation field
-VERSION = "2.91.1"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -3948,11 +3672,6 @@ print(f"[part111] v{VERSION} /llms.txt TVibe Signal")
 # (so the Retry button still works).
 # Turn off with env RESP_CACHE=0. Check it works at GET /cachez.
 # Loader line (any place before part7):  ("part112.py", 0, "SKIP"),
-import asyncio
-import json
-import os
-import time
-import types
 
 _C_ON = os.environ.get("RESP_CACHE", "1") != "0"
 _C_RULES = {"/stats": 120, "/accuracy": 120, "/exit": 60, "/benchmark/daily": 300, "/stats/deployer-shadow": 300}  # path -> seconds
@@ -4170,17 +3889,10 @@ except NameError:
 #   TELEGRAM_GROUP_AUTO=1    optional: also react to any mint address in group chats (needs BotFather /setprivacy -> Disable)
 #   PUBLIC_BASE_URL          optional, default https://signal-api-24q4.onrender.com
 # Loader line (after part112, before part7):  ("part114.py", 0, "SKIP"),
-import asyncio
 import html
-import os
-import re
-import time
-import types
 
 from fastapi import Request
-from fastapi.responses import JSONResponse
 
-VERSION = "2.92.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -4203,7 +3915,6 @@ def _tg_clean(e):
 
 
 async def _tg_call(method, payload=None):
-    import httpx
     async with httpx.AsyncClient(timeout=15) as c:
         r = await c.post("https://api.telegram.org/bot%s/%s" % (_TG_TOKEN, method), json=payload or {})
         return r.json()
@@ -4211,7 +3922,6 @@ async def _tg_call(method, payload=None):
 
 async def _tg_omni(mint):
     """Call our own /omni in-process (same answer, same signing, same cache as the website)."""
-    import httpx
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://internal",
                                  timeout=60) as c:
         r = await c.get("/omni", params={"mint": mint}, headers={"accept": "application/json"})
@@ -4412,11 +4122,9 @@ print("[part114] v%s Telegram bot webhook (%s)" % (VERSION, "ready" if (_TG_TOKE
 #   - /status, /help and /start also answered commands meant for OTHER bots ("/start@otherbot") and were not
 #     rate-limited. Both fixed. /status no longer shows internal counters to everyone.
 #   - removed unused code
-VERSION = "2.92.3"
 app.version = VERSION
 app.openapi_schema = None
 
-import html
 
 _HELP_115 = (
     "<b>TVibe Signal</b>\n"
@@ -4492,12 +4200,9 @@ else:
 #   - it could never close again (the "half" state was only computed in a copy), so after ONE outage every
 #     verdict stayed capped to caution forever. It now closes after the hold time as soon as a source answers ok.
 #   - verdict_capped_by stays a list (part78 uses a list); major assets (SOL, USDC...) are not capped.
-VERSION = "2.93.1"
 app.version = VERSION
 app.openapi_schema = None
 
-import time
-from typing import Any, Dict
 
 _CB = {"state": "closed", "opened_at": 0.0, "reason": "", "open_for_s": 90,
        "dex_fail_streak": 0, "rpc_fail_streak": 0}
@@ -4532,14 +4237,6 @@ def circuit_record_source(name: str, ok: bool) -> None:
         print("[part116] circuit CLOSED")
 
 
-def _add_cap(r: dict, tag: str) -> None:
-    cur = r.get("verdict_capped_by")
-    lst = list(cur) if isinstance(cur, list) else ([str(cur)] if cur else [])
-    if tag not in lst:
-        lst.append(tag)
-    r["verdict_capped_by"] = lst
-
-
 def circuit_apply_to_result(r: dict) -> dict:
     if not isinstance(r, dict):
         return r
@@ -4569,25 +4266,6 @@ def circuit_apply_to_result(r: dict) -> dict:
 _build_prev_116 = globals().get("build_signal")
 
 
-async def build_signal(client, mint, security, *args, **kwargs):
-    res = await _build_prev_116(client, mint, security, *args, **kwargs)
-    try:
-        body = res[0] if isinstance(res, tuple) else res
-        if isinstance(body, dict):
-            src = body.get("sources") or {}
-            if isinstance(src, dict):
-                for k, v in src.items():
-                    if isinstance(v, dict) and "status" in v:
-                        circuit_record_source(k, v.get("status") == "ok")
-                    elif isinstance(v, str):
-                        circuit_record_source(k, v == "ok")
-            circuit_apply_to_result(body)
-        return res
-    except Exception as e:
-        print("[part116] apply:", e)
-        return res
-
-
 @app.get("/system/circuit", tags=["ops"], include_in_schema=False)
 async def system_circuit():
     return {"version": VERSION, **circuit_status()}
@@ -4603,11 +4281,8 @@ print(f"[part116] v{VERSION} circuit breaker (auto-closes) -> GET /system/circui
 #   - the old wrapper only touched body["exit"], which /signal never has, so it did nothing else. Removed.
 #   The sell-cost band for agents now comes from part119 (`sim` on /signal and /omni).
 # This file only keeps the helper, so other code that imports it keeps working.
-VERSION = "2.93.1"
 app.version = VERSION
 app.openapi_schema = None
-
-from typing import Any, Dict, Optional
 
 
 def _slip_band(impact_pct: Optional[float]) -> Dict[str, Any]:
@@ -4644,7 +4319,6 @@ print(f"[part117] v{VERSION} slippage band helper only (no signal changes)")
 # --- part118 ---
 # part118.py - agent map (v2.93.1, reviewed): GET /agent/brain
 # Review fix: it said "/exit has an impact band" - the band is `sim.slippage_band` on /signal and /omni (part119).
-VERSION = "2.93.1"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -4690,15 +4364,10 @@ print(f"[part118] v{VERSION} GET /agent/brain")
 #   - no `sizes` parameter (it created a second cache entry next to the home page's /exit call).
 #   - major assets are skipped; cache is bounded; verdict_capped_by stays a list.
 # Switch off any time with the env var SELL_SIM=0 (each new token costs one Jupiter quote while it is on).
-VERSION = "2.94.1"
 app.version = VERSION
 app.openapi_schema = None
 
-import asyncio
 import contextvars
-import os
-import time
-from typing import Any, Dict, Optional
 
 _SIM_TTL_S = 120
 _SIM_FAIL_TTL_S = 20
@@ -4755,7 +4424,6 @@ def _sim_from_exit(body: dict) -> dict:
 
 
 async def _exit_call(mint: str):
-    import httpx
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://internal",
                                  timeout=_SIM_FETCH_TIMEOUT_S) as c:
         r = await c.get("/exit", params={"mint": mint}, headers={"accept": "application/json"})
@@ -4843,36 +4511,6 @@ def _apply_sim_to_signal(body: dict, sim: dict) -> dict:
 _build_prev_119 = globals().get("build_signal")
 
 
-async def build_signal(client, mint, security, *args, **kwargs):
-    res = await _build_prev_119(client, mint, security, *args, **kwargs)
-    if _IN_SIM.get() or os.environ.get("SELL_SIM", "1") == "0":
-        return res  # inside our own /exit call, or switched off with SELL_SIM=0
-    try:
-        body = res[0] if isinstance(res, tuple) else res
-        if not isinstance(body, dict):
-            return res
-        if body.get("asset_class") == "major" or (body.get("decision") or {}).get("asset_class") == "major":
-            return res
-        st = globals().get("circuit_status")
-        if callable(st):
-            try:
-                if (st() or {}).get("state") == "open":
-                    body["sim"] = {"kind": "skipped", "note": "Upstream stressed - sell quote skipped"}
-                    return res
-            except Exception:
-                pass
-        sim = await _get_sim(str(mint))
-        if sim is None:
-            body["sim"] = {"kind": "jupiter_quote_sim", "status": "pending", "sell_ok": None,
-                           "note": "Sell quote not ready yet. Not proof of safety or danger."}
-        else:
-            _apply_sim_to_signal(body, sim)
-        return res
-    except Exception as e:
-        print("[part119] wrap:", str(e)[:120])
-        return res
-
-
 print(f"[part119] v{VERSION} sell-sim via /exit (unavailable = unknown, no recursion) -> sim.* on signal/omni")
 
 # --- part120 ---
@@ -4888,13 +4526,9 @@ print(f"[part119] v{VERSION} sell-sim via /exit (unavailable = unknown, no recur
 #   - list floors: at least 5 outcomes (default 10), and each row shows lift vs the average, because most
 #     tokens fail anyway; the old "100% bad" on a handful of samples says little.
 #   - the block on every signal was noise; it is attached only when this wallet has >= 10 judged outcomes.
-VERSION = "2.95.1"
 app.version = VERSION
 app.openapi_schema = None
 
-import inspect
-import time
-from typing import Any, Dict, List, Optional
 
 CL_KEY = "si:shadow:cluster:v1"      # top1:<wallet>:n/bad and pair:<creator>_<wallet>:n/bad
 MAP_KEY = "si:shadow:mintmap:v1"     # mint -> "creator|top1"
@@ -4958,38 +4592,6 @@ async def _remember(client, mint: str, body: dict) -> None:
 _prev_out_120 = globals().get("on_outcome_for_si")
 
 
-async def on_outcome_for_si(client, mint: str, bad: bool, meta: Optional[dict] = None, **kwargs):
-    dep = top1 = None
-    try:
-        if globals().get("PRED_ENABLED") and client and "redis_pipe" in globals():
-            raw = await redis_pipe(client, [["HGET", MAP_KEY, mint]])
-            v = (raw or [None])[0]
-            if isinstance(v, str) and "|" in v:
-                a, b = v.split("|", 1)
-                dep, top1 = _w(a), _w(b)
-    except Exception as e:
-        print("[part120] map lookup:", str(e)[:100])
-    meta2 = dict(meta or {})
-    if dep and not meta2.get("creator"):
-        meta2["creator"] = dep  # part110 records the deployer from this
-    if callable(_prev_out_120):
-        try:
-            await _call_prev(_prev_out_120, client, mint, bad, meta2, kwargs)
-        except Exception as e:
-            print("[part120] previous outcome hook:", str(e)[:100])
-    if top1 and globals().get("PRED_ENABLED") and client and "redis_pipe" in globals():
-        try:
-            b = 1 if bad else 0
-            cmds = [["HINCRBY", CL_KEY, "top1:%s:n" % top1, 1], ["HINCRBY", CL_KEY, "top1:%s:bad" % top1, b]]
-            if dep:
-                pair = "pair:%s_%s" % (dep[:16], top1[:16])
-                cmds += [["HINCRBY", CL_KEY, pair + ":n", 1], ["HINCRBY", CL_KEY, pair + ":bad", b]]
-            cmds.append(["EXPIRE", CL_KEY, CL_TTL])
-            await redis_pipe(client, cmds)
-        except Exception as e:
-            print("[part120] cluster outcome:", str(e)[:100])
-
-
 async def _refresh(client, force: bool = False) -> None:
     now = time.time()
     if not force and now - _CL_CACHE["ts"] < 600:
@@ -5026,26 +4628,6 @@ def _row(name: str, c: Dict[str, int], kind: str) -> dict:
 
 
 _build_prev_120 = globals().get("build_signal")
-
-
-async def build_signal(client, mint, security, *args, **kwargs):
-    res = await _build_prev_120(client, mint, security, *args, **kwargs)
-    try:
-        body = res[0] if isinstance(res, tuple) else res
-        if isinstance(body, dict):
-            await _remember(client, str(mint), body)
-            await _refresh(client)
-            top1 = _top1_of(body)
-            c = _CL_CACHE["top1"].get(top1) if top1 else None
-            if c and c["n"] >= _CL_ATTACH_MIN_N:
-                body["shadow_cluster"] = {
-                    "live_verdict_unchanged": True, **_row(top1, c, "top1_holder"),
-                    "average_bad_rate_pct": round(_CL_CACHE["base"], 1) if _CL_CACHE["base"] else None,
-                    "note": "Shadow association from our judged outcomes. Not proof of coordination. "
-                            "Does not change the live verdict."}
-    except Exception as e:
-        print("[part120] wrap:", str(e)[:120])
-    return res
 
 
 @app.get("/stats/cluster-shadow", tags=["accuracy"])
@@ -5130,15 +4712,9 @@ except NameError:
 # Loader line (after part121, before part7):  ("part122.py", 0, "SKIP"),
 import collections
 import copy
-import json
-import os
 import sys
-import time
-import types
 
-from fastapi.responses import JSONResponse
 
-VERSION = "2.97.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -5266,9 +4842,7 @@ print("[part122] v%s redis usage meter -> GET /ops/redis (read cache %s)" % (VER
 # a verdict. Walk-forward (is the gain still there on newer days?) is NOT computed here: it needs per-day outcomes
 # for each rule, which /stats does not publish yet.
 # Loader line (after part122, before part7):  ("part123.py", 0, "SKIP"),
-import time
 
-VERSION = "2.97.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -5317,7 +4891,6 @@ def _evaluate(stats: dict) -> dict:
 
 
 async def _stats_json():
-    import httpx
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://internal", timeout=30) as c:
         r = await c.get("/stats", headers={"accept": "application/json"})
         return r.json() if r.status_code == 200 else None
@@ -5351,11 +4924,8 @@ print("[part123] v%s GET /stats/rule-candidates (stricter shadow-rule check)" % 
 #   - short-TTL keys (rate-limit windows of 60s or less) lost their TTL when an EXPIRE was skipped. Only EXPIRE with
 #     a long TTL (>= 300s and >= 4x the coalesce interval) is coalesced; short ones are always sent.
 #   - a repeated EXPIRE inside one pipeline is dropped only if it is identical (same key and same TTL).
-import os
-import time
 from typing import Dict, List, Tuple
 
-VERSION = "2.98.1"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -5458,25 +5028,6 @@ def _ensure_shadow_cluster(body: dict) -> dict:
 _build_prev_124 = globals().get("build_signal")
 
 
-async def build_signal(client, mint, security, *args, **kwargs):
-    res = await _build_prev_124(client, mint, security, *args, **kwargs)
-    try:
-        body = res[0] if isinstance(res, tuple) else res
-        if isinstance(body, dict):
-            _ensure_shadow_cluster(body)
-            if "system_stress" not in body and callable(globals().get("circuit_status")):
-                try:
-                    st = circuit_status()
-                    body["system_stress"] = {"state": st.get("state"), "reason": st.get("reason"),
-                                             "note": "When open/half, prefer smaller size or wait; data may be stale or partial."}
-                except Exception:
-                    pass
-        return res
-    except Exception as e:
-        print("[part124] shadow ensure:", e)
-        return res
-
-
 @app.get("/ops/redis-thrift", include_in_schema=False)
 async def ops_redis_thrift():
     cin = max(_STATS["cmds_in"], 1)
@@ -5504,10 +5055,7 @@ print("[part124] v%s redis EXPIRE coalesce %ss (long TTL only, positions kept) +
 # (calibrated{p_bad_24h_pct, ci95_pct, based_on_n}) and a pass_note that says what pass means.
 # Policies: default | strict | research (strict also fails on shadow flags, sell-sim friction and an open circuit).
 # Loader: after part124, before part7.
-import os
-from typing import Any, Dict, List, Optional
 
-VERSION = "2.99.2"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -5613,19 +5161,6 @@ def attach_filter(body: dict, policy: Optional[str] = None) -> dict:
 _build_prev_125 = globals().get("build_signal")
 
 
-async def build_signal(client, mint, security, *args, **kwargs):
-    policy = kwargs.pop("filter_policy", None)
-    res = await _build_prev_125(client, mint, security, *args, **kwargs)
-    try:
-        body = res[0] if isinstance(res, tuple) else res
-        if isinstance(body, dict):
-            attach_filter(body, policy)
-        return res
-    except Exception as e:
-        print("[part125] filter:", e)
-        return res
-
-
 @app.get("/filter/policies", tags=["agents"], include_in_schema=False)
 async def filter_policies():
     return {
@@ -5652,9 +5187,6 @@ print("[part125] v%s filter contract (with calibrated history) -> filter.* on si
 #     un-awaited coroutine. The wrapper now matches the handler type.
 #   - when it rebuilds a JSONResponse it keeps the original headers (cache-control etc.).
 import functools
-import inspect
-import json
-from typing import Optional
 
 
 def _enrich_payload(body: dict, policy: Optional[str] = None) -> dict:
@@ -5708,7 +5240,6 @@ def _post(res, policy):
         try:
             data = json.loads(body.decode() if isinstance(body, (bytes, bytearray)) else body)
             if isinstance(data, dict):
-                from fastapi.responses import JSONResponse
                 headers = {k: v for k, v in dict(getattr(res, "headers", {}) or {}).items()
                            if k.lower() not in ("content-length", "content-type")}
                 return JSONResponse(_enrich_payload(data, policy), status_code=getattr(res, "status_code", 200),
@@ -5765,11 +5296,7 @@ print("[part126] v2.99.2 /omni gets filter.* (and shadow/stress if helpers exist
 # part127.py — Phase C cost & reliability surface for agents/desks (v3.0.0)
 # Fair-use text, degrade hints, keep-alive, ops pointers. Does not tighten Redis beyond part124.
 # Loader: after part126, before part7 → ("part127.py", 0, "SKIP"),
-import os
-import time
-from typing import Any, Dict, Optional
 
-VERSION = "3.0.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -5853,30 +5380,6 @@ async def pricing_fair_use():
 _build_prev_127 = globals().get("build_signal")
 
 
-async def build_signal(client, mint, security, *args, **kwargs):
-    res = await _build_prev_127(client, mint, security, *args, **kwargs)
-    try:
-        body = res[0] if isinstance(res, tuple) else res
-        if isinstance(body, dict):
-            body.setdefault(
-                "reliability",
-                {
-                    "class": "best_effort_free",
-                    "docs": "/agents/reliability",
-                    "fair_use": "/pricing",
-                },
-            )
-            # If circuit open, make filter/reasons already handle strict; still expose hint
-            st = body.get("system_stress") if isinstance(body.get("system_stress"), dict) else {}
-            if st.get("state") in ("open", "half"):
-                body["reliability"]["degraded"] = True
-                body["reliability"]["hint"] = "Upstream stress — prefer wait or smaller size; check /system/circuit"
-        return res
-    except Exception as e:
-        print("[part127] ", e)
-        return res
-
-
 # Re-touch /omni enrichment if part126 helpers exist
 _prev_enrich = globals().get("_enrich_payload")
 if callable(_prev_enrich):
@@ -5896,14 +5399,11 @@ print("[part127] v%s Phase C → GET /agents/reliability /pricing + reliability 
 # part128.py - GET /pricing: honest free tier (v3.0.2, reviewed)
 # Review fix vs v3.0.1: /pricing already existed from an older part (first registered route wins), so neither part127 nor the
 # old part128 ever answered. This version removes the older /pricing route(s) first. Browsers get a small page, agents get JSON.
-VERSION = "3.0.2"
 app.version = VERSION
 app.openapi_schema = None
 
 import html as _html
-import os
 
-from fastapi import Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
 try:
@@ -5947,7 +5447,6 @@ print("[part128] v%s /pricing (older route removed first)" % VERSION)
 
 # --- part129 ---
 # part129.py — Phase D policy status (read-only, no live rule changes)
-VERSION = "3.0.1"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -5955,7 +5454,6 @@ app.openapi_schema = None
 async def filter_phase_d():
     strong, judged, err = [], None, None
     try:
-        import httpx
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://internal", timeout=30) as c:
             r = await c.get("/stats/rule-candidates")
             d = r.json() if r.status_code == 200 else {}
@@ -5992,7 +5490,6 @@ print("[part129] v%s GET /filter/phase-d (no auto-promote)" % VERSION)
 # --- part130 ---
 # part130.py — Show filter.pass on the home token card (Phase B UI)
 # Patches HOME_HTML from part104: one chip next to the other status chips.
-VERSION = "3.0.2"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -6044,7 +5541,6 @@ def _patch_home_html():
                 async def _home():
                     return HTMLResponse(globals()["HOME_HTML"])
                 try:
-                    from fastapi.responses import HTMLResponse
                     route.endpoint = _home
                     if hasattr(route, "dependant") and route.dependant is not None:
                         route.dependant.call = _home
@@ -6073,13 +5569,7 @@ print("[part130] v%s filter.pass on web UI (%s)" % (VERSION, "ok" if _ok else "m
 # Part123's /stats/rule-candidates gets walk_forward + promote_ready (strong candidates that also pass walk-forward).
 # Nothing here changes a verdict. Needs part97 (/stats shape) and part123 loaded before it.
 # Loader line (after part129/130, before part7):  ("part131.py", 0, "SKIP"),
-import json
-import math
-import os
-import time
-import types
 
-VERSION = "2.99.3"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -6312,11 +5802,9 @@ print("[part131] v%s walk-forward from daily snapshots -> GET /stats/walk-forwar
 # Review fixes vs v3.0.3: "\~120" and "\~30" were invalid escapes (SyntaxWarning, and the text showed a backslash);
 # "GET /filter/walk-forward" does not exist, the endpoint is /stats/walk-forward.
 # Check that GET /ping exists (the health board at /ops/health reports missing routes); if not, use /health.
-VERSION = "3.0.4"
 app.version = VERSION
 app.openapi_schema = None
 
-from fastapi.responses import PlainTextResponse
 
 _LLMS = """# TVibe Signal
 > Solana token **risk** signals for AI agents. Heuristics, measured in public. Not financial advice.
@@ -6384,9 +5872,7 @@ print("[part132] v%s /llms.txt overridden (filter.pass, walk-forward, verify)" %
 #     webhook raised "'str' object has no attribute 'updates'" and the /pricing page failed. Names are unique now.
 #   - removed a condition that was always true.
 # Set the GitHub link with the env var GITHUB_URL if the repo moves again.
-import os
 
-VERSION = "3.0.5"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -6473,13 +5959,8 @@ print("[part133] v%s Telegram %s on the home nav, GitHub link %s" % (VERSION, _T
 # plain reasons. Every section is optional: a part that is not loaded is reported as "not loaded", never as an error.
 # Optional: set OPS_KEY and call /ops/health?key=<value>. Costs 2 Redis commands per call (the write + read test).
 # Loader line (after part131, before part7):  ("part134.py", 0, "SKIP"),
-import json
-import os
-import time
 
-from fastapi.responses import JSONResponse
 
-VERSION = "2.99.5"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -6528,7 +6009,6 @@ def _dig(d, path):
 
 
 async def _asgi_get(path, params=None, timeout=45):
-    import httpx
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://internal", timeout=timeout) as c:
         r = await c.get(path, params=params or {}, headers={"accept": "application/json"})
         try:
@@ -6740,9 +6220,7 @@ print("[part134] v%s GET /ops/health, /ops/contract-check; schema_version=%s on 
 # Does not touch Telegram bot state, verdicts, or live rules.
 # Loader (after part133, before part7):  ("part135.py", 0, "SKIP"),
 
-import os
 
-VERSION = "3.0.6"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -6842,14 +6320,7 @@ print(
 # Research only: nothing here changes a verdict. Cost: 1 Redis write per new token per day + about 19 commands per judged outcome.
 # Names start with _fl_ / _FL so they cannot clash with other parts (all parts share one namespace).
 # Loader line (after part134, before part7):  ("part135.py", 0, "SKIP"),
-import inspect
-import json
-import math
-import re
-import time
-import types
 
-VERSION = "2.99.6"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -7037,17 +6508,6 @@ async def stats_feature_lift(min_n: int = 30):
 _fl_build_prev = globals().get("build_signal")
 
 
-async def build_signal(client, mint, security, *args, **kwargs):
-    res = await _fl_build_prev(client, mint, security, *args, **kwargs)
-    try:
-        body = res[0] if isinstance(res, tuple) else res
-        if isinstance(body, dict):
-            await _fl_remember(client, str(mint), body)
-    except Exception as e:
-        print("[part135] record:", str(e)[:100])
-    return res
-
-
 _fl_out_prev = globals().get("on_outcome_for_si")
 
 
@@ -7077,17 +6537,12 @@ print("[part135] v%s feature lift tracker -> GET /stats/feature-lift (research o
 # Never upgrades verdict. May add cautions / research flags only.
 # Place BEFORE MCP (part7). Env: WI_ENABLED=1 (default), WI_ESCALATE=0
 
-VERSION = "3.0.7"
 try:
     app.version = VERSION
     app.openapi_schema = None
 except Exception:
     pass
 
-import asyncio
-import json
-import os
-import time
 
 _WI_ON = os.getenv("WI_ENABLED", "1").lower() in ("1", "true", "yes")
 _WI_ESCALATE = os.getenv("WI_ESCALATE", "0").lower() in ("1", "true", "yes")
@@ -7370,12 +6825,10 @@ except Exception as e:
 print("[part136] wallet_intel deployer+bundle shadow -> result.wallet_intel /stats/wallet-intel")
 
 
-
 # --- part138: agent-first surface (view=agent + agent-card + llms hint) ---
 # Clean action contract for agents without SI noise. Free forever spirit.
 # GET /omni?mint=...&view=agent
 # GET /.well-known/agent-card.json
-VERSION = "3.0.8"
 try:
     app.version = VERSION
     app.openapi_schema = None
@@ -7589,17 +7042,14 @@ async def llms_txt_agent_first():
 print("[part138] v%s agent-first: /omni?view=agent + /.well-known/agent-card.json + llms" % VERSION)
 
 
-
 # --- part139: agent playbook (fixed workflow, no code mutation) ---
 # Agents read this and follow steps. Humans gate any code change.
-VERSION = "3.0.9"
 try:
     app.version = VERSION
     app.openapi_schema = None
 except Exception:
     pass
 
-from fastapi.responses import JSONResponse, PlainTextResponse
 
 _BASE = (os.environ.get("PUBLIC_BASE_URL") or "https://signal-api-24q4.onrender.com").rstrip("/")
 
@@ -7728,21 +7178,17 @@ except Exception as _e:
 print("[part139] v%s /agent/playbook (+ .txt) fixed agent workflow" % VERSION)
 
 
-
 # --- part140: rules_version (versioned heuristics, honest cost-of-attack) ---
 # schema_version = API shape; rules_version = risk policy / thresholds.
 # Changing thresholds = bump RULES_VERSION + one-line changelog. No stealth retune.
 # Injected into /omni, /signal, view=agent, playbook, agent-card.
 
-VERSION = "3.0.10"
 try:
     app.version = VERSION
     app.openapi_schema = None
 except Exception:
     pass
 
-import os
-import time
 
 # Bump when hard/soft thresholds or promote-shadow policy change (not every deploy).
 RULES_VERSION = os.environ.get("RULES_VERSION", "2026.10.28.a").strip() or "2026.10.28.a"
@@ -7855,20 +7301,16 @@ if callable(_stats_prev):
 print("[part140] v%s rules_version=%s on omni/signal/agent + GET /rules" % (VERSION, RULES_VERSION))
 
 
-
 # --- part141: free-tier cache policy (verdict TTL + seed caps + public table) ---
 # Read-path TTL by verdict (in-memory cache_get). Avoid stays hot longer = fewer Dex/RPC repeats.
 # Env overrides keep Render free safe without code edits next time.
 
-VERSION = "3.0.11"
 try:
     app.version = VERSION
     app.openapi_schema = None
 except Exception:
     pass
 
-import os
-import time
 
 # --- seed: prefer explicit env; else free-tier-friendly defaults ---
 try:
@@ -7985,21 +7427,16 @@ print(
 )
 
 
-
 # --- part142: agent-runtime (standardized errors + AI-ready view + screen_hot) ---
 # P0: machine-readable errors, richer view=agent. P1: limited hot screen (not full-market oracle).
 # Capital/traffic later improves stats; this improves agent wiring now.
 
-VERSION = "3.0.12"
 try:
     app.version = VERSION
     app.openapi_schema = None
 except Exception:
     pass
 
-import os
-import time
-from typing import Any, Dict, List, Optional
 
 # ---------- standardized agent errors ----------
 # Codes are stable for agent switch/case. retryable => honor retry_after_s.
@@ -8257,10 +7694,6 @@ async def screen_hot(
     }
 
 
-from fastapi import Query
-from fastapi.responses import JSONResponse
-
-
 @app.get("/screen/hot", tags=["product"], summary="Limited hot screen for agents (boost list + filters)")
 async def screen_hot_endpoint(
     request: Request,
@@ -8331,19 +7764,16 @@ globals()["_AGENT_ERROR_FN"] = agent_error
 print("[part142] v%s agent-runtime: errors + agent enrich + GET /screen/hot" % VERSION)
 
 
-
 # --- part143: authority + LP agent surface + soft bundle caution (no gRPC) ---
 # Hard VETO only for clear authorities when already avoid/blockers.
 # Bundle/serial remain shadow: force review (never silent pass). Escalate VETO only via WI_ESCALATE later.
 
-VERSION = "3.0.13"
 try:
     app.version = VERSION
     app.openapi_schema = None
 except Exception:
     pass
 
-import os
 
 _WI_SOFT = os.getenv("WI_SOFT_REVIEW", "1").lower() in ("1", "true", "yes")
 # Optional hard skip when serial/bundle present — default OFF until stats support it
@@ -8484,9 +7914,7 @@ print(
 )
 
 
-
 # --- part144: antifragile / simplicity policy (docs + ops, no new heuristics) ---
-VERSION = "3.0.14"
 try:
     app.version = VERSION
     app.openapi_schema = None
@@ -8580,9 +8008,7 @@ except Exception:
 print("[part144] v%s GET /ops/antifragile — lean principles, no new heuristics" % VERSION)
 
 
-
 # --- part146: core product tradeoff (precision gate > alpha / zero-risk myth) ---
-VERSION = "3.0.16"
 try:
     app.version = VERSION
     app.openapi_schema = None
@@ -8709,11 +8135,9 @@ except Exception as e:
 print("[part146] v%s GET /ops/tradeoff + agent unknowns block pass" % VERSION)
 
 
-
 # --- part147: cycle literacy (tech vs price, real usage, winter survival) ---
 # Product framing only — no new token heuristics.
 
-VERSION = "3.0.17"
 try:
     app.version = VERSION
     app.openapi_schema = None
@@ -8822,9 +8246,7 @@ except Exception as e:
 print("[part147] v%s GET /ops/cycle — cycle literacy framing" % VERSION)
 
 
-
 # --- part148: falsifiability criteria (what would prove the gate wrong) ---
-VERSION = "3.0.18"
 try:
     app.version = VERSION
     app.openapi_schema = None
@@ -8944,9 +8366,7 @@ except Exception as e:
 print("[part148] v%s GET /ops/falsifiability" % VERSION)
 
 
-
 # --- part149: agent-safety + free skill metadata (pay.sh-inspired, no payments) ---
-VERSION = "3.0.19"
 try:
     app.version = VERSION
     app.openapi_schema = None
@@ -9076,7 +8496,6 @@ try:
                     "- Honor skip / filter.pass=false / unknowns.\n"
                     "- Skill metadata: GET /skill.json\n"
                 )
-                from starlette.responses import PlainTextResponse
                 return PlainTextResponse(body.rstrip() + extra, media_type="text/plain; charset=utf-8")
 
             r.endpoint = llms_safety_wrap
@@ -9097,9 +8516,7 @@ if callable(_av149):
 print("[part149] v%s /ops/agent-safety /skill.json — free agent hygiene" % VERSION)
 
 
-
 # --- part150: fair-use headers + public docs (free, no payment) ---
-VERSION = "3.0.20"
 try:
     app.version = VERSION
     app.openapi_schema = None
@@ -9259,7 +8676,6 @@ try:
                     "- Do not cron /omni; keep-alive via /ping only.\n"
                     "- Details: GET /ops/fair-use and GET /pricing\n"
                 )
-                from starlette.responses import PlainTextResponse
                 return PlainTextResponse(body.rstrip() + extra, media_type="text/plain; charset=utf-8")
 
             r.endpoint = llms_fair_wrap
@@ -9270,9 +8686,7 @@ except Exception as e:
 print("[part150] v%s GET /ops/fair-use /pricing + fair-use response headers" % VERSION)
 
 
-
 # --- part151: system limits (demo≠product, no absolute proof, no anthropomorphism) ---
-VERSION = "3.0.21"
 try:
     app.version = VERSION
     app.openapi_schema = None
@@ -9344,7 +8758,6 @@ print("[part151] v%s GET /ops/limits" % VERSION)
 
 
 # --- part152: upstream-down honesty + seed soft status (no heuristic retune) ---
-VERSION = "3.0.22"
 try:
     app.version = VERSION
     app.openapi_schema = None
@@ -9406,7 +8819,6 @@ try:
             async def seed_soft_wrap(request=None):
                 try:
                     # endpoint may or may not take request
-                    import inspect
                     if request is not None and len(inspect.signature(_seed).parameters) >= 1:
                         out = await _seed(request)
                     else:
@@ -9459,9 +8871,7 @@ async def ops_upgrade_status():
 print("[part152] v%s upstream honesty + /ops/upgrade-status" % VERSION)
 
 
-
 # --- part153: response freshness (as_of / valid_for_s / stale — not execution cancel) ---
-VERSION = "3.0.23"
 try:
     app.version = VERSION
     app.openapi_schema = None
@@ -9550,9 +8960,7 @@ async def ops_freshness_policy():
 print("[part153] v%s as_of/valid_for_s/expires_at on agent view + /ops/freshness" % VERSION)
 
 
-
 # --- part154: satisficing checklist + single CTA (choice architecture, no new scores) ---
-VERSION = "3.0.24"
 try:
     app.version = VERSION
     app.openapi_schema = None
@@ -9651,7 +9059,6 @@ try:
                     "- pass = cleared pre-written bar, not the best mint\n"
                     "- Checklist: GET /ops/satisficing\n"
                 )
-                from starlette.responses import PlainTextResponse
                 return PlainTextResponse(body.rstrip() + extra, media_type="text/plain; charset=utf-8")
 
             r.endpoint = llms_satisfice_wrap
@@ -9662,9 +9069,7 @@ except Exception as e:
 print("[part154] v%s GET /ops/satisficing — checklist + one CTA" % VERSION)
 
 
-
 # --- part155: seed soft-empty (empty feed ≠ hard failure) + upgrade status ---
-VERSION = "3.0.25"
 try:
     app.version = VERSION
     app.openapi_schema = None
@@ -9678,7 +9083,6 @@ try:
             _seed_prev = r.endpoint
 
             async def seed_empty_soft(request=None):
-                import inspect
                 try:
                     params = list(inspect.signature(_seed_prev).parameters.keys())
                     if request is not None and params:
@@ -9742,11 +9146,9 @@ async def ops_overall_status():
 print("[part155] v%s seed empty=soft + /ops/status" % VERSION)
 
 
-
 # --- part156: score_35 promote + low-lift weight cut + ok-not-buy (rules_version bump) ---
 # Data-driven (track-record): avoid@50 left many bads in caution; shadow score_35
 # kept avoid precision while lifting recall. Low-lift flags had high prior weights.
-VERSION = "3.0.26"
 RULES_VERSION = "2026.11.15.a"
 try:
     app.version = VERSION
@@ -9978,7 +9380,6 @@ async def ops_rules_changelog():
 print("[part156] v%s RULES_VERSION=%s avoid@%s weight cuts + ok-not-buy" % (VERSION, RULES_VERSION, _AVOID_AT))
 
 
-
 # --- part157: harden /stats + public methodology page + verdict history page ---
 VERSION = "3.0.27"
 try:
@@ -9987,7 +9388,6 @@ try:
 except Exception:
     pass
 
-from fastapi.responses import HTMLResponse, JSONResponse
 import json as _json_157
 
 # --- Harden GET /stats: never 500 the public track record ---
@@ -10152,7 +9552,6 @@ try:
                     "- Methodology: GET /methodology and /methodology.html\n"
                     "- Verdict history UI: GET /history (data from /ledger)\n"
                 )
-                from starlette.responses import PlainTextResponse
                 return PlainTextResponse(body.rstrip() + extra, media_type="text/plain; charset=utf-8")
 
             r.endpoint = llms_history_wrap
@@ -10220,7 +9619,6 @@ async def _mcp_signal(mint: str, security: bool) -> dict:
 
 
 def _setup_mcp():
-    import inspect
 
     kwargs: Dict[str, Any] = dict(stateless_http=True, json_response=True, instructions=MCP_INSTRUCTIONS)
     try:
@@ -10340,3 +9738,5 @@ if _HAS_MCP:
     except Exception as _e:  # noqa: BLE001  never let MCP problems take the REST API down
         mcp_server = None
         mcp_error = f"{type(_e).__name__}: {str(_e)[:200]}"
+
+# --- slim: VERSION unified (kept last value) ---

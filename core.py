@@ -23,7 +23,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-VERSION = "2.0.0"
 DEX_URL = "https://api.dexscreener.com/latest/dex/tokens/{mint}"
 MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")  # base58
 
@@ -209,32 +208,6 @@ _hits: Dict[str, deque] = {}
 _rl_lock = threading.Lock()
 
 
-def client_ip(request: Request) -> str:
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        parts = [x.strip() for x in xff.split(",") if x.strip()]
-        if len(parts) >= TRUSTED_HOPS:
-            return parts[-TRUSTED_HOPS]
-        if parts:
-            return parts[0]
-    return request.client.host if request.client else "unknown"
-
-
-def rate_limited(key: str, limit: int = RATE_LIMIT, cost: int = 1) -> int:
-    """Return 0 if allowed (and record `cost` hits), else seconds to wait."""
-    now = time.time()
-    with _rl_lock:
-        dq = _hits.setdefault(key, deque())
-        while dq and now - dq[0] > RATE_WINDOW:
-            dq.popleft()
-        if len(dq) + cost > limit:
-            return int(RATE_WINDOW - (now - dq[0])) + 1 if dq else RATE_WINDOW
-        dq.extend([now] * cost)
-        if len(_hits) > 5000:  # cleanup stale IPs
-            for k in [k for k, v in _hits.items() if not v or now - v[-1] > RATE_WINDOW]:
-                _hits.pop(k, None)
-    return 0
-
 # --- part2 ---
 # ---------- signal logic ----------
 def pick_best_pair(pairs: list, mint: str) -> Optional[dict]:
@@ -362,71 +335,6 @@ def compute_signals(pair: dict) -> Dict[str, Any]:
 
 
 # ---------- on-chain security (Solana RPC) ----------
-async def rpc(client: httpx.AsyncClient, method: str, params: list):
-    resp = await client.post(
-        RPC_URL, json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
-    )
-    resp.raise_for_status()
-    body = resp.json()
-    if body.get("error"):
-        raise RuntimeError(str(body["error"])[:200])
-    return body.get("result")
-
-
-async def fetch_security(client: httpx.AsyncClient, mint: str) -> Optional[dict]:
-    """Raw on-chain data. Never raises; returns None if nothing could be read."""
-    t_rpc = time.time()
-    info_r, big_r = await asyncio.gather(
-        rpc(client, "getAccountInfo", [mint, {"encoding": "jsonParsed"}]),
-        rpc(client, "getTokenLargestAccounts", [mint, {"commitment": "confirmed"}]),
-        return_exceptions=True,
-    )
-    src_log("solana_rpc", not isinstance(info_r, Exception) and not isinstance(big_r, Exception), t_rpc)
-    raw: Dict[str, Any] = {"info_ok": False, "holders": None, "supply": None}
-
-    try:
-        val = (info_r or {}).get("value") if not isinstance(info_r, Exception) else None
-        data = (val or {}).get("data")
-        parsed = data.get("parsed") if isinstance(data, dict) else None
-        if parsed and parsed.get("type") == "mint":
-            info = parsed.get("info") or {}
-            raw.update(
-                info_ok=True,
-                mint_authority=info.get("mintAuthority"),
-                freeze_authority=info.get("freezeAuthority"),
-                decimals=info.get("decimals"),
-                supply=int(info.get("supply") or 0) or None,
-                program="token-2022" if val.get("owner") == TOKEN_2022 else "spl-token",
-                extensions=[e.get("extension") for e in (info.get("extensions") or []) if isinstance(e, dict)],
-            )
-    except Exception:
-        pass
-
-    try:
-        if not isinstance(big_r, Exception) and big_r:
-            accts = big_r.get("value") or []
-            addrs = [a["address"] for a in accts]
-            owners: Dict[str, str] = {}
-            if addrs:
-                try:
-                    multi = await rpc(client, "getMultipleAccounts", [addrs, {"encoding": "jsonParsed"}])
-                    for addr, acc in zip(addrs, (multi or {}).get("value") or []):
-                        try:
-                            owners[addr] = acc["data"]["parsed"]["info"]["owner"]
-                        except (TypeError, KeyError):
-                            pass
-                except Exception:
-                    pass
-            raw["holders"] = [
-                {"account": a["address"], "owner": owners.get(a["address"]), "amount": int(a.get("amount") or 0)}
-                for a in accts
-            ]
-    except Exception:
-        pass
-
-    if not raw["info_ok"] and raw["holders"] is None:
-        return None
-    return raw
 
 
 async def get_security(client: httpx.AsyncClient, mint: str) -> Optional[dict]:
@@ -441,71 +349,6 @@ async def get_security(client: httpx.AsyncClient, mint: str) -> Optional[dict]:
     if raw:
         cache_set(key, raw)
     return raw
-
-
-def build_security(raw: Optional[dict], pool_ids: set):
-    """Turn raw on-chain data into a public `security` block + extra flags."""
-    if not raw:
-        return {"available": False}, []
-    flags = []
-    out: Dict[str, Any] = {"available": True, "partial": False}
-
-    if raw.get("info_ok"):
-        ma, fa = raw.get("mint_authority"), raw.get("freeze_authority")
-        out.update(
-            mint_authority_revoked=ma is None,
-            freeze_authority_revoked=fa is None,
-            token_program=raw.get("program"),
-            decimals=raw.get("decimals"),
-        )
-        risky = sorted(set(raw.get("extensions") or []) & RISKY_EXTENSIONS)
-        out["risky_extensions"] = risky
-        if ma is not None:
-            flags.append("mint_authority_active")
-        if fa is not None:
-            flags.append("freeze_authority_active")
-        if risky:
-            flags.append("risky_token_extension")
-    else:
-        out["partial"] = True
-
-    holders, supply = raw.get("holders"), raw.get("supply")
-    if holders and supply:
-        excluded_ids = pool_ids | KNOWN_NON_HOLDERS
-        real, pool_pct = [], 0.0
-        for h in holders:
-            pct = h["amount"] / supply * 100
-            if h["owner"] in excluded_ids or h["account"] in excluded_ids:
-                pool_pct += pct
-            else:
-                real.append({"owner": h["owner"] or h["account"], "pct": round(pct, 2)})
-        top1 = real[0]["pct"] if real else 0.0
-        top10 = round(sum(h["pct"] for h in real[:10]), 2)
-        out.update(
-            top1_holder_pct=top1,
-            top10_holders_pct=top10,
-            liquidity_pool_pct=round(pool_pct, 2),
-            top_holders=real[:5],
-        )
-        if top10 >= 80:
-            flags.append("extreme_holder_concentration")
-        elif top10 >= 50:
-            flags.append("high_holder_concentration")
-        if top1 >= 20:
-            flags.append("dominant_holder")
-    else:
-        out["partial"] = True
-    return out, flags
-
-
-def finalize_risk(result: dict, onchain: bool):
-    """Heuristic 0-100 score from market flags (+ on-chain flags when available).
-    It is a quick filter, NOT a guarantee."""
-    score = min(100, sum(ACTIVE_WEIGHTS.get(f, 0) for f in result["flags"]))
-    result["scoring"] = "tuned" if _tune["on"] else "static"
-    result["risk_score"] = score
-    result["risk_level"] = "low" if score < 25 else "medium" if score < 50 else "high"
-    result["risk_basis"] = "market+onchain" if onchain else "market"
 
 
 async def get_lp_lock(client: httpx.AsyncClient, mint: str) -> Optional[dict]:
@@ -537,19 +380,6 @@ async def get_lp_lock(client: httpx.AsyncClient, mint: str) -> Optional[dict]:
     return out
 
 
-async def fetch_dex(client: httpx.AsyncClient, mint: str) -> dict:
-    t0 = time.time()
-    try:
-        resp = await client.get(DEX_URL.format(mint=mint))
-        resp.raise_for_status()
-        data = resp.json()
-        src_log("dexscreener", True, t0)
-        return data
-    except (httpx.HTTPError, ValueError):
-        src_log("dexscreener", False, t0)
-        raise HTTPException(status_code=503, detail="Market data source (DexScreener) is unavailable, retry in a few seconds",
-                            headers={"Retry-After": "10"})
-
 # --- part3 ---
 # ---------- verdict ----------
 REASONS = {
@@ -574,34 +404,6 @@ CAUTION_FLAGS = ["very_low_liquidity", "low_liquidity", "high_holder_concentrati
 AUTHORITY_FLAGS = {"mint_authority_active", "freeze_authority_active"}
 
 
-def add_verdict(result: dict):
-    """One-line decision for agents: ok | caution | avoid (heuristic, not advice)."""
-    flags = set(result["flags"])
-    # Established tokens (e.g. regulated stablecoins) legitimately keep authorities
-    established = result["liquidity_usd"] >= 1_000_000 and (result.get("pair_age_minutes") or 0) >= 43200
-    avoid = [f for f in AVOID_FLAGS if f in flags and not (established and f in AUTHORITY_FLAGS)]
-    caution = [f for f in CAUTION_FLAGS if f in flags]
-    if established:
-        caution = [f for f in AUTHORITY_FLAGS if f in flags] + caution
-    score = result["risk_score"]
-    result["verdict"] = "avoid" if avoid or score >= 50 else "caution" if caution or score >= 25 else "ok"
-    result["verdict_reasons"] = [REASONS[f] for f in avoid + caution]
-    # "full" only when BOTH on-chain sources answered in time
-    result["verdict_confidence"] = "full" if result.get("security") and not result.get("partial") else "market_only"
-    top = "; ".join(result["verdict_reasons"][:3]) or "no major red flags found"
-    result["summary"] = (
-        f"{result.get('token') or '?'}: {result['verdict'].upper()} ({result['verdict_confidence']} data). "
-        f"{top}. Liquidity ${result['liquidity_usd']:,.0f}, risk {result['risk_score']}/100."
-    )
-    nxt = []
-    if result.get("partial"):
-        miss = [k for k, v in (result.get("sources") or {}).items() if v != "ok"]
-        nxt.append("retry in a few seconds for full on-chain data" + (f" (missing: {', '.join(miss)})" if miss else ""))
-    if result["verdict"] != "avoid":
-        nxt.append("run the exit check (GET /exit or MCP check_exit) before sizing a trade")
-    result["suggested_next"] = nxt
-
-
 # ---------- pipeline ----------
 _bg: set = set()
 
@@ -622,117 +424,7 @@ async def _dex_or_prefetched(client: httpx.AsyncClient, mint: str, prefetched: O
     return prefetched if prefetched is not None else await fetch_dex(client, mint)
 
 
-async def fetch_dex_many(client: httpx.AsyncClient, mints: List[str]) -> Optional[Dict[str, dict]]:
-    """ONE DexScreener request for up to 30 mints. Returns {mint: {"pairs": [...]}} or None if the call failed."""
-    out: Dict[str, dict] = {m: {"pairs": []} for m in mints}
-    t0 = time.time()
-    try:
-        resp = await client.get(DEX_URL.format(mint=",".join(mints)))
-        resp.raise_for_status()
-        pairs = resp.json().get("pairs") or []
-        src_log("dexscreener", True, t0)
-    except (httpx.HTTPError, ValueError):
-        src_log("dexscreener", False, t0)
-        return None
-    for p in pairs:
-        for m in {(p.get("baseToken") or {}).get("address"), (p.get("quoteToken") or {}).get("address")}:
-            if m in out:
-                out[m]["pairs"].append(p)
-    return out
-
-
-async def _build_signal_core(client: httpx.AsyncClient, mint: str, security: bool, prefetched: Optional[dict] = None):
-    """Return (result, cache_status). Raises HTTPException on failure."""
-    cache_key = mint if security else mint + ":nosec"
-    hit = cache_peek(cache_key)
-    stale = None
-    if hit:
-        age, cached = hit
-        if age <= (PARTIAL_TTL if cached.get("partial") else CACHE_TTL):
-            return cached, "HIT"
-        if age <= STALE_MAX:
-            stale = (age, cached)
-
-    def serve_stale(err: HTTPException):
-        if stale:
-            return dict(stale[1], stale=True, stale_age_s=int(stale[0])), "STALE"
-        raise err
-
-    # global budget for upstream calls, independent of client IP
-    if prefetched is None and rate_limited("__global__", GLOBAL_LIMIT):  # batches pay once, in build_batch
-        return serve_stale(HTTPException(status_code=503, detail="Service busy, retry shortly", headers={"Retry-After": "5"}))
-
-    try:
-        if security:
-            data, raw_sec, lp_raw = await asyncio.gather(
-                _dex_or_prefetched(client, mint, prefetched),
-                soft(get_security(client, mint), SECONDARY_TIMEOUT),
-                soft(get_lp_lock(client, mint), SECONDARY_TIMEOUT),
-            )
-        else:
-            data, raw_sec, lp_raw = await _dex_or_prefetched(client, mint, prefetched), None, None
-    except HTTPException as e:
-        return serve_stale(e)
-
-    pair = pick_best_pair(data.get("pairs") or [], mint)
-    if not pair:
-        raise HTTPException(status_code=404, detail="No Solana pair found for this token")
-
-    result = compute_signals(pair)
-    result["partial"] = bool(security and (raw_sec is None or lp_raw is None))
-    if security:
-        result["sources"] = {"dexscreener": "ok", "solana_rpc": "ok" if raw_sec else "missing",
-                             "rugcheck": "ok" if lp_raw else "missing"}
-    onchain = False
-    if security:
-        pool_ids = {x for x in (pair.get("pairAddress"),) if x}
-        sec, sec_flags = build_security(raw_sec, pool_ids)
-        result["flags"].extend(sec_flags)
-        if lp_raw:
-            pct = lp_raw.get("lp_locked_pct")
-            sec.update(lp_locked_pct=pct, rugcheck_score=lp_raw.get("rugcheck_score"),
-                       rugcheck_risks=lp_raw.get("rugcheck_risks"), lp_source="rugcheck")
-            # bonding-curve tokens have no LP yet, so skip the LP flags there
-            if pct is not None and pair.get("dexId") != "pumpfun":
-                if pct < 10:
-                    result["flags"].append("lp_not_locked")
-                elif pct < 80:
-                    result["flags"].append("lp_partially_locked")
-        result["security"] = sec
-        onchain = bool(sec.get("available")) or bool(lp_raw)
-    finalize_risk(result, onchain)
-    add_verdict(result)
-    cache_set(cache_key, result)
-    if security and PRED_ENABLED:
-        schedule(record_prediction(client, result))  # fire and forget: adds no latency
-    return result, "MISS"
-
-
 # ---------- data quality (what is missing, how fresh, how complete) ----------
-def with_quality(result: dict, status: str, security: bool) -> dict:
-    """Return a COPY with a data_quality block (the cached dict is never mutated).
-    data_confidence (0-1) = how complete and fresh the data is. It is NOT the probability that the
-    verdict is correct: that is what /stats measures."""
-    now = time.time()
-    age = max(0, int(now - (result.get("timestamp") or now)))
-    freshness = "stale" if status == "STALE" else "fresh" if age <= 5 else "cached"
-    missing = [k for k, v in (result.get("sources") or {}).items() if v != "ok"]
-    completeness = "market_only" if not security else "partial" if missing else "full"
-    conf = 1.0 - sum({"solana_rpc": 0.25, "rugcheck": 0.2}.get(m, 0.15) for m in missing)
-    if not security:
-        conf = min(conf, 0.6)
-    if status == "STALE":
-        conf -= 0.2 + min(0.3, age / 600 * 0.3)
-    return dict(result, data_quality={"freshness": freshness, "age_s": age, "completeness": completeness,
-                                      "missing": missing, "data_confidence": max(0.05, round(conf, 2))})
-
-
-async def build_signal(client: httpx.AsyncClient, mint: str, security: bool, prefetched: Optional[dict] = None):
-    result, status = await _build_signal_core(client, mint, security, prefetched)
-    _m["cache"][status] += 1
-    if result.get("partial"):
-        _m["partial"] += 1
-    return with_quality(result, status, security), status
 
 
 # ---------- smart batch ----------
@@ -741,130 +433,6 @@ _COMPACT_KEYS = ("token", "name", "mint", "price_usd", "liquidity_usd", "pair_ag
                  "verdict_confidence", "verdict_reasons", "risk_score", "risk_level", "flags", "summary", "safety_rank",
                  "partial", "stale", "data_quality")
 
-
-def compact_signal(r: dict) -> dict:
-    out = {k: r.get(k) for k in _COMPACT_KEYS if k in r}
-    sec = r.get("security") or {}
-    for k in ("mint_authority_revoked", "freeze_authority_revoked", "top10_holders_pct", "lp_locked_pct"):
-        if k in sec:
-            out[k] = sec[k]
-    return out
-
-
-async def build_batch(client: httpx.AsyncClient, raw_mints: List[str], security: bool, *, sort: str = "input",
-                      only: Optional[str] = None, max_risk: Optional[int] = None, top: Optional[int] = None,
-                      view: str = "full", charge=None) -> dict:
-    """Smart batch: ONE shared DexScreener request for everything not cached, cost = only what needs fetching,
-    an overall deadline (slow tokens are reported, not waited for), ranking, filters and a one-line summary."""
-    ids = list(dict.fromkeys(m.strip() for m in raw_mints if m and m.strip()))
-    if not ids:
-        raise HTTPException(status_code=400, detail="Provide at least one mint")
-    if len(ids) > MAX_BATCH:
-        raise HTTPException(status_code=400, detail=f"Max {MAX_BATCH} mints per request")
-    if sort not in ("input", "safest", "riskiest"):
-        raise HTTPException(status_code=400, detail="sort must be input, safest or riskiest")
-    if view not in ("full", "compact"):
-        raise HTTPException(status_code=400, detail="view must be full or compact")
-    only_set = None
-    if only:
-        only_set = {x.strip().lower() for x in only.split(",") if x.strip()}
-        if not only_set or not only_set <= {"ok", "caution", "avoid"}:
-            raise HTTPException(status_code=400, detail="only must be a comma list of: ok, caution, avoid")
-
-    errors: List[dict] = []
-    valid: List[str] = []
-    for m in ids:
-        if MINT_RE.match(m):
-            valid.append(m)
-        else:
-            errors.append({"mint": m, "status": 400, "detail": "Invalid Solana token address"})
-
-    # what actually needs upstream work? (fresh cache hits are free)
-    todo = []
-    for m in valid:
-        hit = cache_peek(m if security else m + ":nosec")
-        if not (hit and hit[0] <= (PARTIAL_TTL if hit[1].get("partial") else CACHE_TTL)):
-            todo.append(m)
-    wait = charge(max(1, len(todo))) if charge else 0
-    if wait:
-        raise too_many(wait)
-
-    prefetched: Dict[str, dict] = {}
-    for i in range(0, len(todo), 30):
-        if rate_limited("__global__", GLOBAL_LIMIT):
-            break  # over budget: each token falls back to stale cache or a clear 503
-        got = await fetch_dex_many(client, todo[i:i + 30])
-        if got:
-            prefetched.update(got)
-
-    sem = asyncio.Semaphore(4)
-
-    async def one(m: str) -> dict:
-        async with sem:
-            res, _ = await build_signal(client, m, security, prefetched.get(m))
-            return res
-
-    tasks: Dict[str, Any] = {}
-    for m in valid:
-        t = asyncio.ensure_future(one(m))
-        t.add_done_callback(lambda f: f.cancelled() or f.exception())  # never log 'exception never retrieved'
-        _bg.add(t)
-        t.add_done_callback(_bg.discard)
-        tasks[m] = t
-    if tasks:
-        await asyncio.wait(list(tasks.values()), timeout=BATCH_DEADLINE_S)
-
-    results: List[dict] = []
-    for m in valid:
-        t = tasks[m]
-        if not t.done():  # keeps running in the background and lands in the cache
-            errors.append({"mint": m, "status": 504, "detail": "Still computing, retry in a few seconds", "retry_after_s": 5})
-            continue
-        exc = t.exception()
-        if exc is None:
-            results.append(t.result())
-        elif isinstance(exc, HTTPException):
-            e = {"mint": m, "status": exc.status_code, "detail": exc.detail}
-            if exc.headers and "Retry-After" in exc.headers:
-                e["retry_after_s"] = int(exc.headers["Retry-After"])
-            errors.append(e)
-        else:
-            errors.append({"mint": m, "status": 500, "detail": "Internal error"})
-
-    order = sorted(range(len(results)), key=lambda i: (results[i]["risk_score"], -(results[i].get("liquidity_usd") or 0)))
-    for rank, i in enumerate(order, 1):
-        results[i] = dict(results[i], safety_rank=rank)
-    everything = list(results)
-
-    if only_set:
-        results = [r for r in results if r["verdict"] in only_set]
-    if max_risk is not None:
-        results = [r for r in results if r["risk_score"] <= max_risk]
-    if sort == "safest":
-        results.sort(key=lambda r: r["safety_rank"])
-    elif sort == "riskiest":
-        results.sort(key=lambda r: -r["safety_rank"])
-    if top:
-        results = results[:top]
-    if view == "compact":
-        results = [compact_signal(r) for r in results]
-
-    cnt = Counter(r["verdict"] for r in everything)
-    best = min(everything, key=lambda r: r["safety_rank"]) if everything else None
-    worst = max(everything, key=lambda r: r["safety_rank"]) if everything else None
-    brief = lambda r: {"mint": r["mint"], "token": r.get("token"), "risk_score": r["risk_score"], "verdict": r["verdict"]}  # noqa: E731
-    headline = (f"{len(ids)} requested: {cnt['ok']} ok, {cnt['caution']} caution, {cnt['avoid']} avoid"
-                + (f", {len(errors)} failed" if errors else "")
-                + (f". Lowest risk: {best.get('token')} ({best['risk_score']}/100)" if best else "") + ".")
-    return {
-        "count": len(results),
-        "summary": {"checked": len(ids), "ok": cnt["ok"], "caution": cnt["caution"], "avoid": cnt["avoid"],
-                    "failed": len(errors), "headline": headline,
-                    "safest": brief(best) if best else None, "riskiest": brief(worst) if worst else None,
-                    "min_data_confidence": min((r["data_quality"]["data_confidence"] for r in everything), default=None)},
-        "results": results, "errors": errors, "filtered_out": len(everything) - len(results),
-        "sort": sort, "view": view,
-    }
 
 # --- part4 ---
 # ---------- self-calibration: track record, prediction error, source health ----------
@@ -896,20 +464,6 @@ SRC_WINDOW_S = 600
 
 def src_log(name: str, ok: bool, t0: float):
     _src.setdefault(name, deque(maxlen=40)).append((time.time(), bool(ok), (time.time() - t0) * 1000))
-
-
-def src_status() -> dict:
-    now, out = time.time(), {}
-    for name in ("dexscreener", "solana_rpc", "rugcheck", "jupiter"):
-        recent = [x for x in _src.get(name, ()) if now - x[0] <= SRC_WINDOW_S]
-        if not recent:
-            out[name] = {"status": "unknown"}
-            continue
-        okr = sum(1 for x in recent if x[1]) / len(recent)
-        out[name] = {"status": "ok" if okr >= 0.8 else "degraded" if okr >= 0.4 else "down",
-                     "success_rate_pct": round(okr * 100), "avg_ms": round(sum(x[2] for x in recent) / len(recent)),
-                     "samples": len(recent)}
-    return out
 
 
 # ----- Upstash Redis over REST (no extra dependency) -----
@@ -964,123 +518,6 @@ async def sol_price(client: httpx.AsyncClient) -> Optional[float]:
         return price
     return None
 
-
-async def record_prediction(client: httpx.AsyncClient, r: dict):
-    """Store one verdict to be judged later. At most one per mint per 6h and MAX_PRED_PER_DAY per day."""
-    try:
-        price = float(r.get("price_usd") or 0)
-        mint = r.get("mint")
-        if price <= 0 or not mint:
-            return
-        today = time.strftime("%Y%m%d", time.gmtime())
-        if _pred_day["day"] != today:
-            _pred_day.update(day=today, count=0)
-        if _pred_day["count"] >= MAX_PRED_PER_DAY:
-            return
-        lock = await redis_pipe(client, [["SET", f"plock:{mint}", "1", "EX", 21600, "NX"]])
-        if not lock or lock[0] != "OK":
-            return
-        _pred_day["count"] += 1
-        now = int(time.time())
-        pid = f"{mint}:{now}"
-        sol = await sol_price(client)
-        await redis_pipe(client, [
-            ["HSET", f"pred:{pid}", "mint", mint, "token", r.get("token") or "", "ts", now, "price", price,
-             "liq", r.get("liquidity_usd") or 0, "verdict", r["verdict"], "conf", r["verdict_confidence"],
-             "score", r["risk_score"], "flags", ",".join(r.get("flags") or []), "sol", sol or ""],
-            ["EXPIRE", f"pred:{pid}", PRED_HORIZON_S * 4],
-            ["ZADD", "due", now + PRED_HORIZON_S, pid],
-        ])
-    except Exception:
-        pass
-
-
-async def resolve_due(client: httpx.AsyncClient) -> int:
-    """Judge predictions whose time has come. Returns how many were processed."""
-    now = int(time.time())
-    got = await redis_pipe(client, [["ZRANGEBYSCORE", "due", "-inf", now, "LIMIT", 0, RESOLVE_BATCH]])
-    ids = (got or [[]])[0] or []
-    if not ids:
-        return 0
-    hashes = await redis_pipe(client, [["HGETALL", f"pred:{i}"] for i in ids])
-    if hashes is None:
-        return 0
-    cmds: list = []
-    preds: Dict[str, dict] = {}
-    for pid, h in zip(ids, hashes):
-        d = to_dict(h)
-        if d.get("mint"):
-            preds[pid] = d
-        else:
-            cmds.append(["ZREM", "due", pid])  # hash expired: drop the orphan
-    best: Dict[str, Optional[dict]] = {}
-    sol1: Optional[float] = None
-    if preds:
-        mints = sorted({d["mint"] for d in preds.values()})
-        ask = mints if SOL_MINT in mints else mints + [SOL_MINT]
-        t0 = time.time()
-        try:
-            resp = await client.get(DEX_URL.format(mint=",".join(ask)))
-            resp.raise_for_status()
-            pairs = resp.json().get("pairs") or []
-            src_log("dexscreener", True, t0)
-        except (httpx.HTTPError, ValueError):
-            src_log("dexscreener", False, t0)
-            if cmds:
-                await redis_pipe(client, cmds)
-            return 0  # try again next cycle, nothing is lost
-        for m in mints:
-            best[m] = pick_best_pair([p for p in pairs if (p.get("baseToken") or {}).get("address") == m], m)
-        sp = pick_best_pair([p for p in pairs if (p.get("baseToken") or {}).get("address") == SOL_MINT], SOL_MINT)
-        try:
-            sol1 = float(sp.get("priceUsd")) if sp else None
-        except (TypeError, ValueError):
-            sol1 = None
-
-    recent = []
-    for pid, d in preds.items():
-        cmds += [["ZREM", "due", pid], ["DEL", f"pred:{pid}"]]
-        age = now - int(d.get("ts") or 0)
-        if age > PRED_HORIZON_S * 3:
-            continue  # judged far too late (server was asleep): would distort the stats
-        p0, l0 = float(d.get("price") or 0), float(d.get("liq") or 0)
-        pair = best.get(d["mint"])
-        if pair is None:
-            ret, liq_ratio = -100.0, 0.0
-        else:
-            p1 = float(pair.get("priceUsd") or 0)
-            l1 = float((pair.get("liquidity") or {}).get("usd") or 0)
-            ret = (p1 / p0 - 1) * 100 if p0 > 0 else 0.0
-            liq_ratio = l1 / l0 if l0 > 0 else 1.0
-        bad = ret <= BAD_RETURN_PCT or liq_ratio <= BAD_LIQ_RATIO
-        # market background: how much did SOL itself move over the same window?
-        sol0 = float(d.get("sol") or 0)
-        sol_ret = (sol1 / sol0 - 1) * 100 if (sol1 and sol0 > 0) else None
-        xret = ret - sol_ret if sol_ret is not None else None
-        v, c = d.get("verdict", "?"), d.get("conf", "?")
-        bucket = min(9, int(float(d.get("score") or 0)) // 10)
-        day = time.strftime("%Y%m%d", time.gmtime(int(d.get("ts") or 0)))
-        flags_t = [f for f in (d.get("flags") or "").split(",") if f in RISK_WEIGHTS]
-        groups = ["all", f"v:{v}:{c}", f"rb:{bucket}", f"d:{day}"]
-        groups += [f"f:{f}" for f in flags_t] + [f"fd:{f}:{day}" for f in flags_t]
-        for g in groups:
-            cmds.append(["HINCRBY", "st", f"{g}:n", 1])
-            if bad:
-                cmds.append(["HINCRBY", "st", f"{g}:bad", 1])
-        cmds.append(["HINCRBYFLOAT", "st", f"v:{v}:{c}:ret", round(ret, 2)])
-        if xret is not None:
-            cmds += [["HINCRBYFLOAT", "st", f"v:{v}:{c}:xret", round(xret, 2)], ["HINCRBY", "st", f"v:{v}:{c}:xn", 1]]
-        recent.append(json.dumps({"token": d.get("token"), "mint": d["mint"], "verdict": v, "risk_score": float(d.get("score") or 0),
-                                  "return_pct": round(ret, 1), "sol_return_pct": round(sol_ret, 1) if sol_ret is not None else None,
-                                  "excess_return_pct": round(xret, 1) if xret is not None else None,
-                                  "bad_outcome": bad, "age_h": round(age / 3600, 1)}))
-    for item in recent:
-        cmds.append(["LPUSH", "recent", item])
-    if recent:
-        cmds.append(["LTRIM", "recent", 0, 49])
-    if cmds:
-        await redis_pipe(client, cmds)
-    return len(ids)
 
 # --- part5 ---
 def rate(n: int, bad: int) -> Optional[float]:
@@ -1143,68 +580,6 @@ async def refresh_weights(client: httpx.AsyncClient):
     ACTIVE_WEIGHTS.clear()
     ACTIVE_WEIGHTS.update(new)
     _tune.update(on=changed, n=n_all)
-
-
-async def stats_report(client: httpx.AsyncClient) -> dict:
-    if not PRED_ENABLED:
-        return {"enabled": False, "detail": "Track record store is not configured on this server."}
-    if _stats_cache["data"] and time.time() - _stats_cache["ts"] < STATS_TTL:
-        return _stats_cache["data"]
-    res = await redis_pipe(client, [["HGETALL", "st"], ["ZCARD", "due"], ["LRANGE", "recent", 0, 19]])
-    if res is None:
-        return {"enabled": True, "available": False, "detail": "Stats store unavailable, retry shortly"}
-    st = to_dict(res[0])
-
-    def grp(prefix: str) -> dict:
-        n, bad = int(st.get(f"{prefix}:n", 0)), int(st.get(f"{prefix}:bad", 0))
-        ret = float(st.get(f"{prefix}:ret", 0))
-        xn, xr = int(st.get(f"{prefix}:xn", 0)), float(st.get(f"{prefix}:xret", 0))
-        return {"n": n, "bad_outcome_rate_pct": rate(n, bad),
-                "avg_return_pct": round(ret / n, 1) if n >= MIN_N_SHOW else None,
-                "avg_excess_return_pct": round(xr / xn, 1) if xn >= MIN_N_SHOW else None}
-
-    rows, n_all = flag_stats(st)
-    by_verdict = {v: {c: grp(f"v:{v}:{c}") for c in ("full", "market_only")} for v in ("ok", "caution", "avoid")}
-    ok_r, av_r = by_verdict["ok"]["full"]["bad_outcome_rate_pct"], by_verdict["avoid"]["full"]["bad_outcome_rate_pct"]
-    recent = []
-    for x in res[2] or []:
-        try:
-            recent.append(json.loads(x))
-        except Exception:
-            pass
-    hours = round(PRED_HORIZON_S / 3600, 1)
-    cohorts = []
-    for k in sorted((k for k in st if k.startswith("d:") and k.endswith(":n")), reverse=True)[:14]:
-        day, n = k[2:-2], int(st[k])
-        cohorts.append({"day": day, "n": n,
-                        "bad_outcome_rate_pct": round(int(st.get(f"d:{day}:bad", 0)) / n * 100, 1) if n >= MIN_DAY_N else None})
-    data = {
-        "enabled": True, "available": True, "horizon_hours": hours, "resolved": n_all, "pending": int(res[1] or 0),
-        "bad_outcome_definition": f"price down {abs(BAD_RETURN_PCT):.0f}%+ or liquidity down {round((1 - BAD_LIQ_RATIO) * 100)}%+ "
-                                  f"or pair gone, measured about {hours}h after the verdict",
-        "by_verdict": by_verdict,
-        "avoid_vs_ok_gap_pts": round(av_r - ok_r, 1) if ok_r is not None and av_r is not None else None,
-        "by_risk_bucket": [{"risk_score_range": f"{b * 10}-{b * 10 + 9}", **grp(f"rb:{b}")} for b in range(10)],
-        "flags": rows,
-        "market_adjustment": {
-            "method": "flag lift = observed bad outcomes / bad outcomes expected from each day's overall rate; "
-                      "avg_excess_return_pct = token return minus SOL return over the same window",
-            "active": any(r["market_adjusted"] for r in rows),
-            "days_with_cohort_data": len([c for c in cohorts if c["bad_outcome_rate_pct"] is not None]),
-        },
-        "daily_background": cohorts,
-        "scoring": "tuned" if _tune["on"] else "static",
-        "recent_outcomes": recent,
-        "caveats": [
-            "Only tokens that people query are measured: this is not a random sample of all tokens.",
-            "Bad outcomes can come from ordinary market moves, not only rugs. Flags overlap, so per-flag numbers are not causal.",
-            f"Rates are hidden until there are at least {MIN_N_SHOW} samples.",
-            "Flag lifts are corrected for each day's overall bad-outcome rate once 2+ days of data exist; before that they are raw.",
-            "Heuristic risk scoring, not financial advice.",
-        ],
-    }
-    _stats_cache.update(ts=time.time(), data=data)
-    return data
 
 
 async def resolver_loop(app: FastAPI):
@@ -1296,54 +671,6 @@ async def jup_quote(client: httpx.AsyncClient, mint: str, raw_amount: int) -> di
     q = await _jup_quote_raw(client, mint, raw_amount)
     src_log("jupiter", q["status"] != "unavailable", t0)
     return q
-
-
-async def exit_check(client: httpx.AsyncClient, mint: str, sizes: List[float], sig: dict) -> dict:
-    key = f"exit:{mint}:{','.join(str(x) for x in sizes)}"
-    cached = cache_get(key, EXIT_CACHE_TTL)
-    if cached:
-        return cached
-    price = float(sig.get("price_usd") or 0)
-    dec = (sig.get("security") or {}).get("decimals")
-    if dec is None:
-        raw = await soft(get_security(client, mint), SECONDARY_TIMEOUT)
-        dec = (raw or {}).get("decimals")
-    if price <= 0 or dec is None:
-        return {"available": False, "reason": "price or token decimals unavailable, retry shortly", "note": EXIT_NOTE}
-
-    levels = []
-    for usd in sizes:
-        if rate_limited("__jup__", JUP_LIMIT):
-            levels.append({"size_usd": usd, "status": "rate_limited"})
-            continue
-        q = await jup_quote(client, mint, int(usd / price * 10 ** int(dec)))
-        lvl: Dict[str, Any] = {"size_usd": usd, "status": q["status"]}
-        if q["status"] == "ok":
-            loss = max(0.0, (1 - q["out_usd"] / usd) * 100)
-            lvl.update(sell_receives_usd=round(q["out_usd"], 2), loss_vs_market_pct=round(loss, 2),
-                       jupiter_price_impact_raw=q.get("impact_raw"), routes=q.get("routes"))
-        levels.append(lvl)
-
-    ok = [l for l in levels if l["status"] == "ok"]
-    no_route = any(l["status"] == "no_route" for l in levels)
-    if not ok and not no_route:
-        return {"available": False, "levels": levels, "note": EXIT_NOTE,
-                "reason": "Jupiter quote unavailable or rate limited, retry in a minute"}
-
-    reasons: List[str] = []
-    if no_route:
-        grade, verdict = "no_route", "avoid"
-        reasons.append("No sell route found on Jupiter")
-    else:
-        worst = max(l["loss_vs_market_pct"] for l in ok)
-        grade = "good" if worst < 3 else "fair" if worst < 10 else "poor" if worst < 25 else "very_poor"
-        verdict = {"good": "ok", "fair": "ok", "poor": "caution", "very_poor": "avoid"}[grade]
-        if grade in ("poor", "very_poor"):
-            reasons.append(f"Selling would lose about {worst:.0f}% vs market price (fees + price impact)")
-    result = {"available": True, "exit_route_found": not no_route, "grade": grade, "exit_verdict": verdict,
-              "levels": levels, "reasons": reasons, "note": EXIT_NOTE}
-    cache_set(key, result)
-    return result
 
 
 async def build_exit_report(client: httpx.AsyncClient, mint: str, sizes: List[float]) -> dict:
@@ -1669,7 +996,6 @@ async def health():
 # --- part8 ---
 # ---------- v2.1: honest verdicts, decision object, smarter ranking ----------
 # This file only ADDS or REPLACES functions defined in part1-part6 (same shared namespace).
-VERSION = "2.1.0"
 app.version = VERSION
 app.openapi_schema = None  # force /docs to rebuild with the new version
 
@@ -1698,21 +1024,6 @@ def rank_key(r: dict):
     conf = (r.get("data_quality") or {}).get("data_confidence")
     penalty = round((1 - (conf if conf is not None else 1.0)) * 20)
     return (r["risk_score"] + penalty, -(r.get("liquidity_usd") or 0))
-
-
-def finalize_risk(result: dict, onchain: bool):
-    """Heuristic 0-100 score. Rug-style flags are not scored for majors and established tokens."""
-    cls = asset_class(result)
-    result["asset_class"] = cls
-    skip = RUG_STYLE_FLAGS if cls in ("major", "established") else set()
-    score = min(100, sum(ACTIVE_WEIGHTS.get(f, 0) for f in result["flags"] if f not in skip))
-    result["scoring"] = "tuned" if _tune["on"] else "static"
-    result["risk_score"] = score
-    result["risk_level"] = "low" if score < 25 else "medium" if score < 50 else "high"
-    result["risk_basis"] = "market+onchain" if onchain else "market"
-    shown = sorted(skip & set(result["flags"]))
-    if shown:
-        result["flags_not_scored"] = shown
 
 
 def _positives(r: dict) -> list:
@@ -1784,150 +1095,8 @@ def add_verdict(result: dict):
 _with_quality_v20 = with_quality
 
 
-def with_quality(result: dict, status: str, security: bool) -> dict:
-    out = _with_quality_v20(result, status, security)
-    dq, d = out["data_quality"], dict(out.get("decision") or {})
-    if d:
-        unknown = [f"{m} did not answer" for m in dq["missing"]]
-        if not security:
-            unknown.append("On-chain checks were skipped (security=false)")
-        if status == "STALE":
-            unknown.append(f"Data is {dq['age_s']}s old because the live source was down")
-        if d.get("verdict") != "avoid":
-            unknown.append("Exit cost not checked yet (use check_exit)")
-        d.update(unknowns=unknown, confidence=dq["data_confidence"], freshness=dq["freshness"])
-        out["decision"] = d
-    return out
-
-
 _compact_v20 = compact_signal
 
-
-def compact_signal(r: dict) -> dict:
-    out = _compact_v20(r)
-    if "asset_class" in r:
-        out["asset_class"] = r["asset_class"]
-    d = r.get("decision")
-    if d:
-        out["decision"] = {k: d[k] for k in ("blockers", "unknowns", "confidence", "valid_for_s") if k in d}
-    return out
-
-
-async def build_batch(client: httpx.AsyncClient, raw_mints: List[str], security: bool, *, sort: str = "input",
-                      only: Optional[str] = None, max_risk: Optional[int] = None, top: Optional[int] = None,
-                      view: str = "full", charge=None) -> dict:
-    """Smart batch: ONE shared DexScreener request for everything not cached, cost = only what needs fetching,
-    an overall deadline (slow tokens are reported, not waited for), ranking, filters and a one-line summary."""
-    ids = list(dict.fromkeys(m.strip() for m in raw_mints if m and m.strip()))
-    if not ids:
-        raise HTTPException(status_code=400, detail="Provide at least one mint")
-    if len(ids) > MAX_BATCH:
-        raise HTTPException(status_code=400, detail=f"Max {MAX_BATCH} mints per request")
-    if sort not in ("input", "safest", "riskiest"):
-        raise HTTPException(status_code=400, detail="sort must be input, safest or riskiest")
-    if view not in ("full", "compact"):
-        raise HTTPException(status_code=400, detail="view must be full or compact")
-    only_set = None
-    if only:
-        only_set = {x.strip().lower() for x in only.split(",") if x.strip()}
-        if not only_set or not only_set <= {"ok", "caution", "avoid"}:
-            raise HTTPException(status_code=400, detail="only must be a comma list of: ok, caution, avoid")
-
-    errors: List[dict] = []
-    valid: List[str] = []
-    for m in ids:
-        if MINT_RE.match(m):
-            valid.append(m)
-        else:
-            errors.append({"mint": m, "status": 400, "detail": "Invalid Solana token address"})
-
-    # what actually needs upstream work? (fresh cache hits are free)
-    todo = []
-    for m in valid:
-        hit = cache_peek(m if security else m + ":nosec")
-        if not (hit and hit[0] <= (PARTIAL_TTL if hit[1].get("partial") else CACHE_TTL)):
-            todo.append(m)
-    wait = charge(max(1, len(todo))) if charge else 0
-    if wait:
-        raise too_many(wait)
-
-    prefetched: Dict[str, dict] = {}
-    for i in range(0, len(todo), 30):
-        if rate_limited("__global__", GLOBAL_LIMIT):
-            break  # over budget: each token falls back to stale cache or a clear 503
-        got = await fetch_dex_many(client, todo[i:i + 30])
-        if got:
-            prefetched.update(got)
-
-    sem = asyncio.Semaphore(4)
-
-    async def one(m: str) -> dict:
-        async with sem:
-            res, _ = await build_signal(client, m, security, prefetched.get(m))
-            return res
-
-    tasks: Dict[str, Any] = {}
-    for m in valid:
-        t = asyncio.ensure_future(one(m))
-        t.add_done_callback(lambda f: f.cancelled() or f.exception())  # never log 'exception never retrieved'
-        _bg.add(t)
-        t.add_done_callback(_bg.discard)
-        tasks[m] = t
-    if tasks:
-        await asyncio.wait(list(tasks.values()), timeout=BATCH_DEADLINE_S)
-
-    results: List[dict] = []
-    for m in valid:
-        t = tasks[m]
-        if not t.done():  # keeps running in the background and lands in the cache
-            errors.append({"mint": m, "status": 504, "detail": "Still computing, retry in a few seconds", "retry_after_s": 5})
-            continue
-        exc = t.exception()
-        if exc is None:
-            results.append(t.result())
-        elif isinstance(exc, HTTPException):
-            e = {"mint": m, "status": exc.status_code, "detail": exc.detail}
-            if exc.headers and "Retry-After" in exc.headers:
-                e["retry_after_s"] = int(exc.headers["Retry-After"])
-            errors.append(e)
-        else:
-            errors.append({"mint": m, "status": 500, "detail": "Internal error"})
-
-    order = sorted(range(len(results)), key=lambda i: rank_key(results[i]))
-    for rank, i in enumerate(order, 1):
-        results[i] = dict(results[i], safety_rank=rank)
-    everything = list(results)
-
-    if only_set:
-        results = [r for r in results if r["verdict"] in only_set]
-    if max_risk is not None:
-        results = [r for r in results if r["risk_score"] <= max_risk]
-    if sort == "safest":
-        results.sort(key=lambda r: r["safety_rank"])
-    elif sort == "riskiest":
-        results.sort(key=lambda r: -r["safety_rank"])
-    if top:
-        results = results[:top]
-    if view == "compact":
-        results = [compact_signal(r) for r in results]
-
-    cnt = Counter(r["verdict"] for r in everything)
-    best = min(everything, key=lambda r: r["safety_rank"]) if everything else None
-    worst = max(everything, key=lambda r: r["safety_rank"]) if everything else None
-    brief = lambda r: {"mint": r["mint"], "token": r.get("token"), "risk_score": r["risk_score"], "verdict": r["verdict"]}  # noqa: E731
-    headline = (f"{len(ids)} requested: {cnt['ok']} ok, {cnt['caution']} caution, {cnt['avoid']} avoid"
-                + (f", {len(errors)} failed" if errors else "")
-                + (f". Lowest risk: {best.get('token')} ({best['risk_score']}/100)" if best else "") + ".")
-    return {
-        "count": len(results),
-        "summary": {"checked": len(ids), "ok": cnt["ok"], "caution": cnt["caution"], "avoid": cnt["avoid"],
-                    "failed": len(errors), "headline": headline,
-                    "safest": brief(best) if best else None, "riskiest": brief(worst) if worst else None,
-                    "min_data_confidence": min((r["data_quality"]["data_confidence"] for r in everything), default=None)},
-        "results": results, "errors": errors, "filtered_out": len(everything) - len(results),
-        "sort": sort, "view": view,
-        "rank_basis": "risk_score + data-quality penalty (up to 20 points), ties broken by liquidity",
-    }
 
 # --- part9 ---
 # ---------- v2.1: resilience, API keys, tamper-evident ledger ----------
@@ -1937,33 +1106,6 @@ import hmac
 # --- Solana RPC: fallbacks, one retry, circuit breaker ---
 RPC_FALLBACKS = [u.strip() for u in (os.getenv("SOLANA_RPC_FALLBACKS") or "").split(",") if u.strip()]
 _rpc_state: Dict[str, Any] = {"fails": 0, "open_until": 0.0}
-
-
-async def rpc(client: httpx.AsyncClient, method: str, params: list):
-    """Try the primary RPC, then each fallback, then the primary once more. After 5 failed calls in a row the
-    breaker opens for 20s so a dead RPC cannot pile up requests (signals just come back marked partial)."""
-    if time.time() < _rpc_state["open_until"]:
-        raise RuntimeError("RPC circuit open: skipped for a few seconds")
-    urls = [RPC_URL] + RPC_FALLBACKS + [RPC_URL]
-    payload = {"jsonrpc": "2.0", "id": 1, "method": method, "params": params}
-    last = "no attempt"
-    for i, url in enumerate(urls):
-        try:
-            resp = await client.post(url, json=payload, timeout=4.0)
-            resp.raise_for_status()
-            body = resp.json()
-            if body.get("error"):
-                raise RuntimeError(str(body["error"])[:200])
-            _rpc_state["fails"] = 0
-            return body.get("result")
-        except Exception as e:  # noqa: BLE001
-            last = f"{type(e).__name__}: {str(e)[:120]}"
-            if i < len(urls) - 1:
-                await asyncio.sleep(0.2)
-    _rpc_state["fails"] += 1
-    if _rpc_state["fails"] >= 5:
-        _rpc_state.update(fails=0, open_until=time.time() + 20)
-    raise RuntimeError(last)
 
 
 # --- optional API keys: a key gets its own, higher rate limit (no more sharing an IP with strangers) ---
@@ -1989,12 +1131,6 @@ def client_ip(request: Request) -> str:
             if hmac.compare_digest(given.encode(), key.encode()):
                 return "key:" + label
     return _client_ip_v20(request)
-
-
-def rate_limited(key: str, limit: Optional[int] = None, cost: int = 1) -> int:
-    if limit is None:
-        limit = KEY_RATE_LIMIT if str(key).startswith("key:") else RATE_LIMIT
-    return _rate_limited_v20(key, limit, cost)
 
 
 # --- ledger: every recorded verdict is chained to the previous one with SHA-256 ---
@@ -2035,41 +1171,6 @@ async def ledger_append(client: httpx.AsyncClient, entry: dict):
                                   ["LTRIM", "ledger", 0, LEDGER_KEEP - 1], ["SET", "ledger_head", h]])
 
 
-async def record_prediction(client: httpx.AsyncClient, r: dict):
-    """Store one verdict to be judged later. At most one per mint per 6h and MAX_PRED_PER_DAY per day."""
-    try:
-        price = float(r.get("price_usd") or 0)
-        mint = r.get("mint")
-        if price <= 0 or not mint:
-            return
-        today = time.strftime("%Y%m%d", time.gmtime())
-        if _pred_day["day"] != today:
-            _pred_day.update(day=today, count=0)
-        if _pred_day["count"] >= MAX_PRED_PER_DAY:
-            return
-        lock = await redis_pipe(client, [["SET", f"plock:{mint}", "1", "EX", 21600, "NX"]])
-        if not lock or lock[0] != "OK":
-            return
-        _pred_day["count"] += 1
-        now = int(time.time())
-        pid = f"{mint}:{now}"
-        sol = await sol_price(client)
-        await redis_pipe(client, [
-            ["HSET", f"pred:{pid}", "mint", mint, "token", r.get("token") or "", "ts", now, "price", price,
-             "liq", r.get("liquidity_usd") or 0, "verdict", r["verdict"], "conf", r["verdict_confidence"],
-             "score", r["risk_score"], "flags", ",".join(r.get("flags") or []), "sol", sol or ""],
-            ["EXPIRE", f"pred:{pid}", PRED_HORIZON_S * 4],
-            ["ZADD", "due", now + PRED_HORIZON_S, pid],
-        ])
-        await ledger_append(client, {
-            "id": pid, "ts": now, "mint": mint, "token": r.get("token") or "", "verdict": r["verdict"],
-            "risk_score": r["risk_score"], "price_usd": price, "liquidity_usd": r.get("liquidity_usd") or 0,
-            "flags": sorted(r.get("flags") or []), "version": VERSION,
-        })
-    except Exception:
-        pass
-
-
 @app.get("/ledger", tags=["trust"], summary="Tamper-evident list of every recorded verdict (hash chain)")
 async def ledger_route(request: Request, limit: int = Query(50, ge=1, le=500, description="Newest entries to return")):
     wait = rate_limited(client_ip(request))
@@ -2106,78 +1207,11 @@ def _h(x: Any) -> str:
     return _html.escape(str(x if x is not None else "-"), quote=True)
 
 
-def _num(v: Any, suffix: str = "") -> str:
-    return "-" if v is None else f"{v}{suffix}"
-
-
 def _rate_cell(rate_pct: Optional[float], n: int) -> str:
     if rate_pct is None:
         return f'<td class="muted">hidden (n={n}, needs {MIN_N_SHOW}+)</td>'
     w = max(0.0, min(100.0, float(rate_pct)))
     return f'<td><div class="bar"><span style="width:{w:.0f}%"></span></div> {w:.1f}% <span class="muted">(n={n})</span></td>'
-
-
-def render_accuracy(rep: dict, head: Optional[str]) -> str:
-    body = []
-    if not rep.get("enabled"):
-        body.append('<div class="card">The track record is not switched on yet on this server. When it is, every verdict is recorded '
-                    "and judged about a day later, and the results appear here.</div>")
-    elif rep.get("available") is False:
-        body.append('<div class="card">The statistics store is temporarily unavailable. Please try again in a minute.</div>')
-    else:
-        resolved, pending = int(rep.get("resolved") or 0), int(rep.get("pending") or 0)
-        if resolved < MIN_N_SHOW:
-            body.append(f'<div class="card"><b>Collecting data.</b> {resolved} verdicts judged so far, {pending} waiting for their '
-                        f"{_h(rep.get('horizon_hours'))}h mark. Rates appear once a group has {MIN_N_SHOW}+ samples. "
-                        "Nothing is hidden or adjusted by hand.</div>")
-        rows = "".join(
-            f"<tr><td><b>{_h(v)}</b></td>{_rate_cell(g.get('bad_outcome_rate_pct'), g.get('n', 0))}"
-            f"<td>{_num(g.get('avg_return_pct'), '%')}</td><td>{_num(g.get('avg_excess_return_pct'), '%')}</td></tr>"
-            for v, d in (rep.get("by_verdict") or {}).items() for g in [d.get("full") or {}])
-        body.append("<h2>Bad outcomes by verdict</h2><table><tr><th>Verdict</th><th>Share with a bad outcome</th>"
-                    f"<th>Avg return</th><th>Avg vs SOL</th></tr>{rows}</table>")
-        gap = rep.get("avoid_vs_ok_gap_pts")
-        if gap is not None:
-            word = "higher" if gap >= 0 else "LOWER (the verdicts are not working here)"
-            body.append(f'<p class="note">Tokens marked <b>avoid</b> had a bad-outcome rate {abs(gap)} points {word} than tokens marked <b>ok</b>.</p>')
-        brows = "".join(f"<tr><td>{_h(b['risk_score_range'])}</td>{_rate_cell(b.get('bad_outcome_rate_pct'), b.get('n', 0))}</tr>"
-                        for b in rep.get("by_risk_bucket") or [] if b.get("n"))
-        if brows:
-            body.append(f"<h2>Does a higher risk score mean more bad outcomes?</h2><table><tr><th>Risk score</th><th>Share with a bad outcome</th></tr>{brows}</table>")
-        drows = "".join(f"<tr><td>{_h(c['day'])}</td><td>{_h(c['n'])}</td><td>{_num(c.get('bad_outcome_rate_pct'), '%')}</td></tr>"
-                        for c in rep.get("daily_background") or [])
-        if drows:
-            body.append("<h2>The market background, day by day</h2><p class=\"muted\">Share of all judged tokens with a bad outcome that day. "
-                        f"Flag statistics are corrected for this.</p><table><tr><th>Day</th><th>Judged</th><th>Bad outcomes</th></tr>{drows}</table>")
-        frows = "".join(f"<tr><td>{_h(f['flag'])}</td><td>{_h(f['n'])}</td><td>{_num(f.get('bad_rate_pct'), '%')}</td>"
-                        f"<td>{_num(f.get('lift'))}{' (adjusted)' if f.get('market_adjusted') else ''}</td></tr>"
-                        for f in rep.get("flags") or [] if f.get("n"))
-        if frows:
-            body.append(f"<h2>Flags</h2><table><tr><th>Flag</th><th>Judged</th><th>Bad rate</th><th>Lift</th></tr>{frows}</table>")
-        rrows = "".join(f"<tr><td>{_h(r.get('token'))}</td><td>{_h(r.get('verdict'))}</td><td>{_h(r.get('risk_score'))}</td>"
-                        f"<td>{_num(r.get('return_pct'), '%')}</td><td>{'bad' if r.get('bad_outcome') else 'ok'}</td></tr>"
-                        for r in (rep.get("recent_outcomes") or [])[:10])
-        if rrows:
-            body.append(f"<h2>Latest judged verdicts</h2><table><tr><th>Token</th><th>Verdict</th><th>Risk</th><th>Return</th><th>Outcome</th></tr>{rrows}</table>")
-    caveats = "".join(f"<li>{_h(c)}</li>" for c in rep.get("caveats") or [])
-    ledger = (f'<p>Ledger head: <code>{_h(head)}</code></p>' if head else "")
-    return f"""<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TVibex402 accuracy</title><style>
-:root{{--bg:#070b12;--card:rgba(18,25,35,.8);--line:rgba(34,48,66,.8);--text:#e8eef6;--muted:#8b9bb4;--a:#14f195;--b:#9945ff}}
-*{{box-sizing:border-box;margin:0;padding:0}}body{{background:var(--bg);color:var(--text);font-family:system-ui,sans-serif;line-height:1.55}}
-.wrap{{max-width:760px;margin:0 auto;padding:32px 16px 70px}}h1{{font-size:2rem;background:linear-gradient(120deg,var(--b),var(--a));-webkit-background-clip:text;background-clip:text;color:transparent}}
-h2{{font-size:1.1rem;margin:26px 0 10px}}.muted{{color:var(--muted);font-size:.88rem}}.card{{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:16px 0}}
-table{{width:100%;border-collapse:collapse;font-size:.9rem;display:block;overflow-x:auto}}th,td{{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}}
-.bar{{display:inline-block;width:90px;height:8px;background:var(--line);border-radius:6px;vertical-align:middle;overflow:hidden}}.bar span{{display:block;height:100%;background:var(--b)}}
-.note{{margin:10px 0;padding:10px 12px;border-left:3px solid var(--a);background:var(--card)}}a{{color:var(--a)}}code{{word-break:break-all;font-size:.78rem}}li{{margin:4px 0 4px 18px}}
-</style></head><body><div class="wrap"><h1>Measured accuracy</h1>
-<p class="muted">Every verdict this API gives is recorded, then judged about {_h(rep.get('horizon_hours', 24))} hours later. This page shows what actually happened, including when the verdicts are wrong.</p>
-{''.join(body)}
-<h2>How we measure</h2><p class="muted">{_h(rep.get('bad_outcome_definition', 'A bad outcome means price down 50%+, liquidity down 70%+, or the pair disappeared.'))}</p>
-<ul class="muted">{caveats}</ul>{ledger}
-<p class="muted" style="margin-top:14px"><a href="/ledger">Tamper-evident ledger</a> &bull; <a href="/stats">Raw JSON</a> &bull; <a href="/">Home</a></p>
-<p class="muted" style="margin-top:18px">Heuristic data, not financial advice. Past measurements do not predict future results.</p>
-</div></body></html>"""
 
 
 @app.get("/accuracy", response_class=HTMLResponse, tags=["trust"], summary="Public accuracy dashboard")
@@ -2214,7 +1248,6 @@ Optional header X-API-Key gives a higher rate limit (keys are issued by the oper
 # --- part11 ---
 # ---------- v2.1.1: holder accuracy, abuse resistance, hygiene ----------
 # Adds or replaces functions from earlier parts (same shared namespace). Loads before part7 (MCP).
-VERSION = "2.1.1"
 app.version = VERSION
 app.openapi_schema = None  # rebuild /docs with the new version
 import contextvars
@@ -2258,84 +1291,6 @@ def is_pda(addr: str) -> Optional[bool]:
 # A holder that is a program-derived address whose own account belongs to a program (an AMM pool, a bonding curve,
 # a staking vault...) is not a person. Wallets and multisig vaults (system-owned) still count as holders.
 _fetch_security_v20 = fetch_security
-
-
-async def fetch_security(client: httpx.AsyncClient, mint: str) -> Optional[dict]:
-    raw = await _fetch_security_v20(client, mint)
-    try:
-        holders = (raw or {}).get("holders") or []
-        pdas = sorted({h["owner"] for h in holders if h.get("owner") and is_pda(h["owner"])})
-        if pdas:
-            res = await rpc(client, "getMultipleAccounts", [pdas, {"encoding": "base64", "dataSlice": {"offset": 0, "length": 0}}])
-            infos = dict(zip(pdas, (res or {}).get("value") or []))
-            for h in holders:
-                if h.get("owner") in infos:
-                    acc = infos[h["owner"]]
-                    program = (acc or {}).get("owner")
-                    h["program_owned"] = bool(acc) and program != SYSTEM_PROGRAM
-                    if h["program_owned"]:
-                        h["program"] = program
-    except Exception:  # noqa: BLE001  best effort: without it we simply fall back to the old behaviour
-        pass
-    return raw
-
-
-def build_security(raw: Optional[dict], pool_ids: set):
-    """Turn raw on-chain data into a public `security` block + extra flags."""
-    if not raw:
-        return {"available": False}, []
-    flags = []
-    out: Dict[str, Any] = {"available": True, "partial": False}
-
-    if raw.get("info_ok"):
-        ma, fa = raw.get("mint_authority"), raw.get("freeze_authority")
-        out.update(
-            mint_authority_revoked=ma is None,
-            freeze_authority_revoked=fa is None,
-            token_program=raw.get("program"),
-            decimals=raw.get("decimals"),
-        )
-        risky = sorted(set(raw.get("extensions") or []) & RISKY_EXTENSIONS)
-        out["risky_extensions"] = risky
-        if ma is not None:
-            flags.append("mint_authority_active")
-        if fa is not None:
-            flags.append("freeze_authority_active")
-        if risky:
-            flags.append("risky_token_extension")
-    else:
-        out["partial"] = True
-
-    holders, supply = raw.get("holders"), raw.get("supply")
-    if holders and supply:
-        excluded_ids = pool_ids | KNOWN_NON_HOLDERS
-        real, pool_pct, prog_pct = [], 0.0, 0.0
-        for h in holders:
-            pct = h["amount"] / supply * 100
-            if h["owner"] in excluded_ids or h["account"] in excluded_ids or h.get("program_owned"):
-                pool_pct += pct
-                if h.get("program_owned"):
-                    prog_pct += pct
-            else:
-                real.append({"owner": h["owner"] or h["account"], "pct": round(pct, 2)})
-        top1 = real[0]["pct"] if real else 0.0
-        top10 = round(sum(h["pct"] for h in real[:10]), 2)
-        out.update(
-            top1_holder_pct=top1,
-            top10_holders_pct=top10,
-            liquidity_pool_pct=round(pool_pct, 2),
-            program_owned_pct=round(prog_pct, 2),
-            top_holders=real[:5],
-        )
-        if top10 >= 80:
-            flags.append("extreme_holder_concentration")
-        elif top10 >= 50:
-            flags.append("high_holder_concentration")
-        if top1 >= 20:
-            flags.append("dominant_holder")
-    else:
-        out["partial"] = True
-    return out, flags
 
 
 # --- a reserved lane in the shared upstream budget for keyed clients ---
@@ -2433,7 +1388,6 @@ programs are excluded (liquidity_pool_pct, program_owned_pct). Wallets and multi
 # --- part12 ---
 # ---------- v2.2: honest PumpSwap LP status + richer home page ----------
 # Adds or replaces things from earlier parts (same shared namespace). Loads before part7 (MCP).
-VERSION = "2.2.0"
 app.version = VERSION
 app.openapi_schema = None  # rebuild /docs with the new version
 
@@ -2449,23 +1403,7 @@ RUG_STYLE_FLAGS.add("lp_unverified")
 _finalize_risk_v21 = finalize_risk
 
 
-def finalize_risk(result: dict, onchain: bool):
-    if result.get("dex") == "pumpswap" and {"lp_not_locked", "lp_partially_locked"} & set(result["flags"]):
-        result["flags"] = [f for f in result["flags"] if f not in ("lp_not_locked", "lp_partially_locked")] + ["lp_unverified"]
-        if isinstance(result.get("security"), dict):
-            result["security"]["lp_note"] = PUMPSWAP_LP_NOTE
-    _finalize_risk_v21(result, onchain)
-
-
 _with_quality_v21 = with_quality
-
-
-def with_quality(result: dict, status: str, security: bool) -> dict:
-    out = _with_quality_v21(result, status, security)
-    d = out.get("decision")
-    if d and "lp_unverified" in out.get("flags", []):
-        out["decision"] = dict(d, unknowns=list(d.get("unknowns") or []) + ["LP burn/lock is unverified for this PumpSwap pool"])
-    return out
 
 
 # --- home page: decision panels, data quality line, exit button (patched into the existing page) ---
@@ -2540,7 +1478,6 @@ security.lp_note explains it. Check the pool's LP mint holders on a block explor
 # --- part13 ---
 # ---------- v2.3: Token-2022 details, smarter batch filters ----------
 # Adds or replaces things from earlier parts (same shared namespace). Loads before part7 (MCP).
-VERSION = "2.3.0"
 app.version = VERSION
 app.openapi_schema = None  # rebuild /docs with the new version
 
@@ -3000,7 +1937,6 @@ Limits: 2 open streams per IP (10 per API key), 30 tokens watched at once. Liste
 # Adds or replaces things from earlier parts (same shared namespace). Loads before part7 (MCP).
 import calendar
 
-VERSION = "2.4.0"
 app.version = VERSION
 app.openapi_schema = None  # rebuild /docs with the new version
 
@@ -3019,96 +1955,6 @@ def wilson(k: int, n: int, z: float = 1.96):
     centre = (p + z * z / (2 * n)) / d
     half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / d
     return max(0.0, centre - half), min(1.0, centre + half)
-
-
-async def resolve_due(client: httpx.AsyncClient) -> int:
-    """Judge predictions whose time has come. Returns how many were processed."""
-    now = int(time.time())
-    got = await redis_pipe(client, [["ZRANGEBYSCORE", "due", "-inf", now, "LIMIT", 0, RESOLVE_BATCH]])
-    ids = (got or [[]])[0] or []
-    if not ids:
-        return 0
-    hashes = await redis_pipe(client, [["HGETALL", f"pred:{i}"] for i in ids])
-    if hashes is None:
-        return 0
-    cmds: list = []
-    preds: Dict[str, dict] = {}
-    for pid, h in zip(ids, hashes):
-        d = to_dict(h)
-        if d.get("mint"):
-            preds[pid] = d
-        else:
-            cmds.append(["ZREM", "due", pid])  # hash expired: drop the orphan
-    best: Dict[str, Optional[dict]] = {}
-    sol1: Optional[float] = None
-    if preds:
-        mints = sorted({d["mint"] for d in preds.values()})
-        ask = mints if SOL_MINT in mints else mints + [SOL_MINT]
-        t0 = time.time()
-        try:
-            resp = await client.get(DEX_URL.format(mint=",".join(ask)))
-            resp.raise_for_status()
-            pairs = resp.json().get("pairs") or []
-            src_log("dexscreener", True, t0)
-        except (httpx.HTTPError, ValueError):
-            src_log("dexscreener", False, t0)
-            if cmds:
-                await redis_pipe(client, cmds)
-            return 0  # try again next cycle, nothing is lost
-        for m in mints:
-            best[m] = pick_best_pair([p for p in pairs if (p.get("baseToken") or {}).get("address") == m], m)
-        sp = pick_best_pair([p for p in pairs if (p.get("baseToken") or {}).get("address") == SOL_MINT], SOL_MINT)
-        try:
-            sol1 = float(sp.get("priceUsd")) if sp else None
-        except (TypeError, ValueError):
-            sol1 = None
-
-    recent = []
-    for pid, d in preds.items():
-        cmds += [["ZREM", "due", pid], ["DEL", f"pred:{pid}"]]
-        age = now - int(d.get("ts") or 0)
-        if age > PRED_HORIZON_S * 3:
-            continue  # judged far too late (server was asleep): would distort the stats
-        p0, l0 = float(d.get("price") or 0), float(d.get("liq") or 0)
-        pair = best.get(d["mint"])
-        if pair is None:
-            ret, liq_ratio = -100.0, 0.0
-        else:
-            p1 = float(pair.get("priceUsd") or 0)
-            l1 = float((pair.get("liquidity") or {}).get("usd") or 0)
-            ret = (p1 / p0 - 1) * 100 if p0 > 0 else 0.0
-            liq_ratio = l1 / l0 if l0 > 0 else 1.0
-        bad = ret <= BAD_RETURN_PCT or liq_ratio <= BAD_LIQ_RATIO
-        # market background: how much did SOL itself move over the same window?
-        sol0 = float(d.get("sol") or 0)
-        sol_ret = (sol1 / sol0 - 1) * 100 if (sol1 and sol0 > 0) else None
-        xret = ret - sol_ret if sol_ret is not None else None
-        v, c = d.get("verdict", "?"), d.get("conf", "?")
-        bucket = min(9, int(float(d.get("score") or 0)) // 10)
-        day = time.strftime("%Y%m%d", time.gmtime(int(d.get("ts") or 0)))
-        flags_t = [f for f in (d.get("flags") or "").split(",") if f in RISK_WEIGHTS]
-        groups = ["all", f"v:{v}:{c}", f"rb:{bucket}", f"d:{day}"]
-        groups += [f"f:{f}" for f in flags_t] + [f"fd:{f}:{day}" for f in flags_t]
-        base_pred = "avoid" if BASELINE_FLAGS & set((d.get("flags") or "").split(",")) else "ok"
-        groups += [f"vd:{v}:{c}:{day}", f"bl:{base_pred}", f"bd:{base_pred}:{day}"]  # per-day verdicts + the simple baseline
-        for g in groups:
-            cmds.append(["HINCRBY", "st", f"{g}:n", 1])
-            if bad:
-                cmds.append(["HINCRBY", "st", f"{g}:bad", 1])
-        cmds.append(["HINCRBYFLOAT", "st", f"v:{v}:{c}:ret", round(ret, 2)])
-        if xret is not None:
-            cmds += [["HINCRBYFLOAT", "st", f"v:{v}:{c}:xret", round(xret, 2)], ["HINCRBY", "st", f"v:{v}:{c}:xn", 1]]
-        recent.append(json.dumps({"token": d.get("token"), "mint": d["mint"], "verdict": v, "risk_score": float(d.get("score") or 0),
-                                  "return_pct": round(ret, 1), "sol_return_pct": round(sol_ret, 1) if sol_ret is not None else None,
-                                  "excess_return_pct": round(xret, 1) if xret is not None else None,
-                                  "bad_outcome": bad, "age_h": round(age / 3600, 1)}))
-    for item in recent:
-        cmds.append(["LPUSH", "recent", item])
-    if recent:
-        cmds.append(["LTRIM", "recent", 0, 49])
-    if cmds:
-        await redis_pipe(client, cmds)
-    return len(ids)
 
 
 async def refresh_raw_stats(client: httpx.AsyncClient, force: bool = True):
@@ -3193,18 +2039,6 @@ def calibration_for(r: dict) -> Optional[dict]:
 _with_quality_v23 = with_quality
 
 
-def with_quality(result: dict, status: str, security: bool) -> dict:
-    out = _with_quality_v23(result, status, security)
-    if PRED_ENABLED:
-        if time.time() - _raw_st["ts"] > RAW_ST_TTL:
-            _raw_st["ts"] = time.time()  # one refresh per interval, in the background
-            schedule(refresh_raw_stats(app.state.client))
-        ctx = calibration_for(out)
-        if ctx:
-            out["track_record_context"] = ctx
-    return out
-
-
 _compact_v23 = compact_signal
 
 
@@ -3219,59 +2053,9 @@ def compact_signal(r: dict) -> dict:
 _stats_report_v23 = stats_report
 
 
-async def stats_report(client: httpx.AsyncClient) -> dict:
-    rep = await _stats_report_v23(client)
-    if rep.get("enabled") and rep.get("available") is not False:
-        await refresh_raw_stats(client, force=False)
-        rep = dict(rep, performance=performance_from(_raw_st["st"]))
-    return rep
-
 # --- part16 ---
 # ---------- v2.4: methodology page and the new accuracy-page sections ----------
 # Adds or replaces things from earlier parts (same shared namespace). Loads before part7 (MCP).
-
-
-def methodology_report() -> dict:
-    """Everything that decides a verdict, in the open."""
-    return {
-        "version": VERSION,
-        "verdict_rules": {
-            "summary": ("avoid if any avoid-flag is present or the risk score is 50 or more; caution if any caution-flag is present "
-                        "or the score is 25 or more; otherwise ok. Majors (wrapped SOL, USDC, USDT) skip rug-style checks; "
-                        "established tokens (liquidity $1M+, older than 30 days) show them without scoring them."),
-            "avoid_flags": list(AVOID_FLAGS), "caution_flags": list(CAUTION_FLAGS),
-            "rug_style_flags": sorted(RUG_STYLE_FLAGS), "avoid_score_threshold": 50, "caution_score_threshold": 25,
-        },
-        "risk_score": {
-            "how": "sum of the weights of the flags present, capped at 100",
-            "scoring": "tuned" if _tune["on"] else "static",
-            "weights_in_use": dict(sorted(ACTIVE_WEIGHTS.items())),
-            "weights_default": dict(sorted(RISK_WEIGHTS.items())),
-        },
-        "auto_tune": {
-            "enabled": AUTO_TUNE, "currently_tuned": bool(_tune["on"]), "judged_samples": _tune["n"],
-            "how": ("Each flag's weight is blended (at most 50%) toward a value suggested by how much that flag raised the "
-                    "bad-outcome rate versus the same day's overall rate. It only starts once a flag has 30+ judged samples and "
-                    "100+ judged tokens exist. Default: off."),
-        },
-        "outcomes": {
-            "horizon_hours": round(PRED_HORIZON_S / 3600, 1),
-            "bad_outcome": f"price down {abs(BAD_RETURN_PCT):.0f}%+, or liquidity down {round((1 - BAD_LIQ_RATIO) * 100)}%+, or the pair disappeared",
-            "judged": "every verdict is stored, then judged once after the horizon; a tamper-evident hash chain is at /ledger",
-            "minimum_samples_to_show_a_rate": MIN_N_SHOW,
-        },
-        "baseline": {
-            "definition": "avoid anything with liquidity under $50k or a pair younger than 6 hours",
-            "why": "A signal that cannot beat two simple rules is not worth the complexity. The accuracy page shows both side by side.",
-        },
-        "data_sources": ["DexScreener (market)", "Solana RPC (authorities, holders)", "RugCheck (LP lock)", "Jupiter (exit quotes)"],
-        "limits": [
-            "Verdicts are heuristics, not advice and not a security audit.",
-            "Only tokens that people query are measured, not a random sample of the market.",
-            "A bad outcome can come from ordinary market moves, not only from rugs.",
-            "A Jupiter quote does not prove a real sell will succeed.",
-        ],
-    }
 
 
 @app.get("/methodology", tags=["trust"], summary="Exactly how verdicts and risk scores are computed")
@@ -3317,13 +2101,6 @@ def render_methodology() -> str:
 _render_accuracy_v23 = render_accuracy
 
 
-def render_accuracy(rep: dict, head: Optional[str]) -> str:
-    page = _render_accuracy_v23(rep, head)
-    extra = (render_performance(rep["performance"]) if rep.get("performance") else "") + render_methodology()
-    marker = "<h2>How we measure</h2>"
-    return page.replace(marker, extra + marker, 1) if marker in page else page
-
-
 LLMS_TXT = LLMS_TXT + """
 ## Methodology and performance
 GET /methodology: the exact rules, thresholds, weights in use, auto-tuning rules, baseline and limits.
@@ -3338,7 +2115,6 @@ It is a historical rate, not the chance that this token will fail.
 # Adds or replaces things from earlier parts (same shared namespace). Loads before part7 (MCP).
 import platform
 
-VERSION = "2.5.0"
 app.version = VERSION
 app.openapi_schema = None  # rebuild /docs with the new version
 
@@ -3441,15 +2217,6 @@ def finalize_risk(result: dict, onchain: bool):
 _with_quality_v24 = with_quality
 
 
-def with_quality(result: dict, status: str, security: bool) -> dict:
-    out = _with_quality_v24(result, status, security)
-    seen, d = _fresh_exit(out.get("mint")), out.get("decision")
-    if d and seen:
-        unknowns = [u for u in d.get("unknowns", []) if not u.startswith("Exit cost not checked")]
-        out["decision"] = dict(d, unknowns=unknowns, exit_grade=seen[1])
-    return out
-
-
 # --- pricing and limits: always generated from the live settings, so the page cannot drift from the code ---
 CONTACT_URL = os.getenv("CONTACT_URL", "")
 
@@ -3505,7 +2272,6 @@ After an exit check, no_sell_route (avoid) and high_exit_cost (caution) also att
 # --- part18 ---
 # ---------- v2.6: Holder Quality + Dip Absorption ----------
 # Không override with_quality nữa để tránh đệ quy với part19.
-VERSION = "2.6.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -3640,7 +2406,6 @@ async def _load_prev_tops(client, mint: str):
     try:
         raw = await redis_get(client, HOLDER_CACHE_KEY.format(mint))
         if raw:
-            import json
             return json.loads(raw)
     except Exception:
         pass
@@ -3651,7 +2416,6 @@ async def _save_curr_tops(client, mint: str, tops):
     if not PRED_ENABLED or not client or not tops:
         return
     try:
-        import json
         await redis_set(client, HOLDER_CACHE_KEY.format(mint), json.dumps(tops), HOLDER_CACHE_TTL)
     except Exception:
         pass
@@ -3693,7 +2457,6 @@ async def build_signal(client: httpx.AsyncClient, mint: str, security: bool, pre
 # May this product be honest, useful to the people who rely on it, and never promise what it cannot keep.
 #
 # Adds or replaces things from earlier parts (same shared namespace). Loads before part7 (MCP).
-VERSION = "2.7.2"
 app.version = VERSION
 app.openapi_schema = None  # rebuild /docs with the new version
 
@@ -3701,14 +2464,6 @@ app.openapi_schema = None  # rebuild /docs with the new version
 BASE_CACHE_TTL = 30
 STALE_MAX = max(STALE_MAX, 900)      # stale answers may be served for up to 15 minutes
 PARTIAL_TTL = max(PARTIAL_TTL, 15)   # partial answers live a little longer
-
-
-def homeostat() -> int:
-    """When DexScreener is degraded or down, keep answers in cache longer."""
-    global CACHE_TTL
-    status = (src_status().get("dexscreener") or {}).get("status")
-    CACHE_TTL = BASE_CACHE_TTL * {"degraded": 3, "down": 6}.get(status, 1)
-    return CACHE_TTL
 
 
 # --- pre-mortem (mental models): for every reason against a token, what would have to change for it to go away? ---
@@ -4095,23 +2850,6 @@ async def _gt_fetch(client, mint: str):
             return None
 
 
-async def fetch_dex(client: httpx.AsyncClient, mint: str) -> dict:
-    """DexScreener first; if it refuses (503), GeckoTerminal in DexScreener's shape; else the original error."""
-    try:
-        data = await _fetch_dex_direct(client, mint)
-        _FALLBACK_MINTS.pop(mint, None)  # DexScreener is back for this token
-        return data
-    except HTTPException as exc:
-        if exc.status_code != 503:
-            raise
-        pairs = await _gt_fetch(client, mint)
-        if not pairs:
-            raise  # fallback failed too: report the original DexScreener problem
-        _FALLBACK_MINTS[mint] = time.time()
-        print(f"[fallback] geckoterminal served {mint[:6]} ({len(pairs)} pools)")
-        return {"pairs": pairs}
-
-
 async def fetch_dex_many(client: httpx.AsyncClient, mints: List[str]) -> Optional[Dict[str, dict]]:
     """ONE DexScreener request for up to 30 mints. Returns {mint: {"pairs": [...]}} or None if the call failed or
     the source is cooling down (callers then fall back to stale cache, the single fetch_dex, or a clear 503).
@@ -4204,7 +2942,6 @@ async def favicon():
 # --- part20 ---
 # ---------- part20: v2.8.0 — Phase 2 step 1: anti-429 + anti-sleep ----------
 # Loads before part7 (MCP). Same shared namespace as all other parts.
-VERSION = "2.8.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -4322,7 +3059,6 @@ print(f"[part20] v{VERSION} anti-429/anti-sleep ready (STALE_MAX={STALE_MAX}s)")
 # --- part21 ---
 # ---------- part21: v2.8.1 — Phase 2 step 2: seed traffic + accuracy growth ----------
 # Loads before part7 (MCP). Slow, capped sampling so track-record fills without melting DexScreener.
-VERSION = "2.8.1"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -4339,88 +3075,6 @@ def _seed_day_ok() -> bool:
     if _seed_state["day"] != today:
         _seed_state.update(day=today, count=0)
     return _seed_state["count"] < SEED_MAX_PER_DAY
-
-
-async def _seed_candidate_mints(client: httpx.AsyncClient) -> list:
-    """Solana mints from DexScreener boosts + latest profiles (best-effort, no throw)."""
-    mints = []
-    for url in (_SEED_BOOST, _SEED_PROFILES):
-        try:
-            resp = await client.get(url, timeout=6.0)
-            if resp.status_code != 200:
-                continue
-            data = resp.json()
-            if not isinstance(data, list):
-                continue
-            for row in data:
-                if (row.get("chainId") or "").lower() != "solana":
-                    continue
-                addr = row.get("tokenAddress") or row.get("token_address")
-                if addr and MINT_RE.match(addr) and addr not in MAJOR_ASSETS:
-                    mints.append(addr)
-        except Exception:
-            continue
-    # de-dupe, shuffle lightly by time bucket
-    seen = set()
-    out = []
-    for m in mints:
-        if m not in seen:
-            seen.add(m)
-            out.append(m)
-    if out:
-        # rotate starting point so we don't always hit the same top boosts
-        off = int(time.time() // SEED_INTERVAL_S) % len(out)
-        out = out[off:] + out[:off]
-    return out
-
-
-async def run_one_seed(client: httpx.AsyncClient) -> dict:
-    """Fetch one diverse mint and run full signal path (records prediction automatically)."""
-    if not SEED_ENABLED:
-        return {"ok": False, "detail": "SEED_TRAFFIC disabled"}
-    if not _seed_day_ok():
-        return {"ok": False, "detail": f"daily seed cap {SEED_MAX_PER_DAY} reached"}
-    now = time.time()
-    if now - _seed_state["last"] < SEED_INTERVAL_S:
-        wait = int(SEED_INTERVAL_S - (now - _seed_state["last"]))
-        return {"ok": False, "detail": "too soon", "retry_after_s": wait}
-    try:
-        if float(_DEX_COOLDOWN.get("until") or 0) > now:
-            return {"ok": False, "detail": "dex cooling, skip seed"}
-    except Exception:
-        pass
-
-    mints = await _seed_candidate_mints(client)
-    if not mints:
-        _seed_state["errors"] += 1
-        return {"ok": False, "detail": "no solana candidates from boosts/profiles"}
-
-    # pick first not recently locked by prediction lock (best effort: try up to 5)
-    last_err = None
-    for mint in mints[:5]:
-        try:
-            result, status = await build_signal(client, mint, True)
-            _seed_state.update(last=time.time(), last_mint=mint, last_ok=True, count=_seed_state["count"] + 1)
-            return {
-                "ok": True,
-                "mint": mint,
-                "token": result.get("token"),
-                "verdict": result.get("verdict"),
-                "risk_score": result.get("risk_score"),
-                "cache": status,
-                "seeded_today": _seed_state["count"],
-            }
-        except HTTPException as e:
-            last_err = getattr(e, "detail", str(e))
-            if getattr(e, "status_code", None) == 503:
-                break  # don't hammer further
-            continue
-        except Exception as e:
-            last_err = str(e)[:120]
-            continue
-    _seed_state["errors"] += 1
-    _seed_state["last"] = time.time()
-    return {"ok": False, "detail": last_err or "all candidates failed"}
 
 
 @app.get("/seed", tags=["ops"], summary="Slow sample of live tokens to grow accuracy data",
@@ -4534,9 +3188,7 @@ print(f"[part21] v{VERSION} seed traffic ready (interval={SEED_INTERVAL_S}s, max
 # --- part22 ---
 # ---------- part22: v2.9.0 - cleaner track record: no major assets, one verdict per mint per 24h, source labels ----------
 # Loads before part7 (MCP). Replaces record_prediction and resolve_due, widens the seed candidates, adds by_source to /stats.
-import contextvars
 
-VERSION = "2.9.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -4554,135 +3206,6 @@ def _pred_source(mint: str) -> str:
     if _PRED_SRC.get() == "seed":
         return "seed_" + _SEED_ORIGIN.get(mint, "other")
     return "user"
-
-
-async def record_prediction(client: httpx.AsyncClient, r: dict):
-    """Store one verdict to be judged later. Skips major assets, one per mint per 24h, MAX_PRED_PER_DAY per day."""
-    try:
-        price = float(r.get("price_usd") or 0)
-        mint = r.get("mint")
-        if price <= 0 or not mint or mint in MAJOR_ASSETS:
-            return
-        today = time.strftime("%Y%m%d", time.gmtime())
-        if _pred_day["day"] != today:
-            _pred_day.update(day=today, count=0)
-        if _pred_day["count"] >= MAX_PRED_PER_DAY:
-            return
-        lock = await redis_pipe(client, [["SET", f"plock24:{mint}", "1", "EX", PRED_LOCK_S, "NX"]])
-        if not lock or lock[0] != "OK":
-            return
-        _pred_day["count"] += 1
-        now = int(time.time())
-        pid = f"{mint}:{now}"
-        sol = await sol_price(client)
-        src = _pred_source(mint)
-        await redis_pipe(client, [
-            ["HSET", f"pred:{pid}", "mint", mint, "token", r.get("token") or "", "ts", now, "price", price,
-             "liq", r.get("liquidity_usd") or 0, "verdict", r["verdict"], "conf", r["verdict_confidence"],
-             "score", r["risk_score"], "flags", ",".join(r.get("flags") or []), "sol", sol or "", "src", src],
-            ["EXPIRE", f"pred:{pid}", PRED_HORIZON_S * 4],
-            ["ZADD", "due", now + PRED_HORIZON_S, pid],
-        ])
-        await ledger_append(client, {
-            "id": pid, "ts": now, "mint": mint, "token": r.get("token") or "", "verdict": r["verdict"],
-            "risk_score": r["risk_score"], "price_usd": price, "liquidity_usd": r.get("liquidity_usd") or 0,
-            "flags": sorted(r.get("flags") or []), "version": VERSION, "src": src,
-        })
-    except Exception:
-        pass
-
-
-async def resolve_due(client: httpx.AsyncClient) -> int:
-    """Judge predictions whose time has come. Returns how many were processed. (v2.9: skips major assets, labels the source)"""
-    now = int(time.time())
-    got = await redis_pipe(client, [["ZRANGEBYSCORE", "due", "-inf", now, "LIMIT", 0, RESOLVE_BATCH]])
-    ids = (got or [[]])[0] or []
-    if not ids:
-        return 0
-    hashes = await redis_pipe(client, [["HGETALL", f"pred:{i}"] for i in ids])
-    if hashes is None:
-        return 0
-    cmds: list = []
-    preds: Dict[str, dict] = {}
-    for pid, h in zip(ids, hashes):
-        d = to_dict(h)
-        if d.get("mint"):
-            preds[pid] = d
-        else:
-            cmds.append(["ZREM", "due", pid])  # hash expired: drop the orphan
-    best: Dict[str, Optional[dict]] = {}
-    sol1: Optional[float] = None
-    if preds:
-        mints = sorted({d["mint"] for d in preds.values()})
-        ask = mints if SOL_MINT in mints else mints + [SOL_MINT]
-        t0 = time.time()
-        try:
-            resp = await client.get(DEX_URL.format(mint=",".join(ask)))
-            resp.raise_for_status()
-            pairs = resp.json().get("pairs") or []
-            src_log("dexscreener", True, t0)
-        except (httpx.HTTPError, ValueError):
-            src_log("dexscreener", False, t0)
-            if cmds:
-                await redis_pipe(client, cmds)
-            return 0  # try again next cycle, nothing is lost
-        for m in mints:
-            best[m] = pick_best_pair([p for p in pairs if (p.get("baseToken") or {}).get("address") == m], m)
-        sp = pick_best_pair([p for p in pairs if (p.get("baseToken") or {}).get("address") == SOL_MINT], SOL_MINT)
-        try:
-            sol1 = float(sp.get("priceUsd")) if sp else None
-        except (TypeError, ValueError):
-            sol1 = None
-
-    recent = []
-    for pid, d in preds.items():
-        cmds += [["ZREM", "due", pid], ["DEL", f"pred:{pid}"]]
-        if d["mint"] in MAJOR_ASSETS:
-            continue  # v2.9: SOL and stablecoins are not judged (they would only pad the ok group)
-        age = now - int(d.get("ts") or 0)
-        if age > PRED_HORIZON_S * 3:
-            continue  # judged far too late (server was asleep): would distort the stats
-        p0, l0 = float(d.get("price") or 0), float(d.get("liq") or 0)
-        pair = best.get(d["mint"])
-        if pair is None:
-            ret, liq_ratio = -100.0, 0.0
-        else:
-            p1 = float(pair.get("priceUsd") or 0)
-            l1 = float((pair.get("liquidity") or {}).get("usd") or 0)
-            ret = (p1 / p0 - 1) * 100 if p0 > 0 else 0.0
-            liq_ratio = l1 / l0 if l0 > 0 else 1.0
-        bad = ret <= BAD_RETURN_PCT or liq_ratio <= BAD_LIQ_RATIO
-        # market background: how much did SOL itself move over the same window?
-        sol0 = float(d.get("sol") or 0)
-        sol_ret = (sol1 / sol0 - 1) * 100 if (sol1 and sol0 > 0) else None
-        xret = ret - sol_ret if sol_ret is not None else None
-        v, c = d.get("verdict", "?"), d.get("conf", "?")
-        bucket = min(9, int(float(d.get("score") or 0)) // 10)
-        day = time.strftime("%Y%m%d", time.gmtime(int(d.get("ts") or 0)))
-        flags_t = [f for f in (d.get("flags") or "").split(",") if f in RISK_WEIGHTS]
-        src = d.get("src") or "untagged"  # v2.9: where the request came from; older rows have no label
-        groups = ["all", f"v:{v}:{c}", f"rb:{bucket}", f"d:{day}", f"src:{src}", f"srcv:{src}:{v}"]
-        groups += [f"f:{f}" for f in flags_t] + [f"fd:{f}:{day}" for f in flags_t]
-        base_pred = "avoid" if BASELINE_FLAGS & set((d.get("flags") or "").split(",")) else "ok"
-        groups += [f"vd:{v}:{c}:{day}", f"bl:{base_pred}", f"bd:{base_pred}:{day}"]  # per-day verdicts + the simple baseline
-        for g in groups:
-            cmds.append(["HINCRBY", "st", f"{g}:n", 1])
-            if bad:
-                cmds.append(["HINCRBY", "st", f"{g}:bad", 1])
-        cmds.append(["HINCRBYFLOAT", "st", f"v:{v}:{c}:ret", round(ret, 2)])
-        if xret is not None:
-            cmds += [["HINCRBYFLOAT", "st", f"v:{v}:{c}:xret", round(xret, 2)], ["HINCRBY", "st", f"v:{v}:{c}:xn", 1]]
-        recent.append(json.dumps({"token": d.get("token"), "mint": d["mint"], "verdict": v, "risk_score": float(d.get("score") or 0),
-                                  "return_pct": round(ret, 1), "sol_return_pct": round(sol_ret, 1) if sol_ret is not None else None,
-                                  "excess_return_pct": round(xret, 1) if xret is not None else None,
-                                  "bad_outcome": bad, "age_h": round(age / 3600, 1), "src": src}))
-    for item in recent:
-        cmds.append(["LPUSH", "recent", item])
-    if recent:
-        cmds.append(["LTRIM", "recent", 0, 49])
-    if cmds:
-        await redis_pipe(client, cmds)
-    return len(ids)
 
 
 # ---------- seed candidates: boosts + profiles (DexScreener, paid promotion) plus trending + new pools (GeckoTerminal) ----------
@@ -4785,25 +3308,12 @@ def _by_source(st: dict) -> dict:
 _stats_report_v21 = stats_report
 
 
-async def stats_report(client: httpx.AsyncClient) -> dict:
-    rep = await _stats_report_v21(client)
-    if rep.get("enabled") and rep.get("available") is not False:
-        await refresh_raw_stats(client, force=False)
-        note = ("From v2.9: major assets (SOL, USDC, USDT) are no longer judged and each mint is recorded at most once "
-                "per 24h. Rows judged earlier are labelled 'untagged' and may include repeats. by_source separates "
-                "user requests from seeded samples (seed_boost and seed_profile are paid promotions on DexScreener; "
-                "seed_trending and seed_new come from GeckoTerminal).")
-        rep = dict(rep, by_source=_by_source(_raw_st["st"]), caveats=list(rep.get("caveats") or []) + [note])
-    return rep
-
-
 print(f"[part22] v{VERSION} track record: majors skipped, 1 verdict/mint/{PRED_LOCK_S // 3600}h, sources labelled (gecko={SEED_GECKO})")
 
 # --- part23 ---
 # ---------- part23: v2.10.0 - upstream canary: is each market source alive, readable and in agreement? ----------
 # Loads before part7 (MCP). part19 already falls back to GeckoTerminal when DexScreener refuses; this part makes that
 # visible and checked: a small probe (SOL) every CANARY_EVERY_S compares both sources and the shape of their answers.
-VERSION = "2.10.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -4976,7 +3486,6 @@ print(f"[part23] v{VERSION} upstream canary ready (every {CANARY_EVERY_S}s, max 
 # ---------- part24: v2.11.0 - shadow rules and early checks: learn faster, compare other rules on the same tokens ----------
 # Loads before part7 (MCP). Every new verdict also stores what five alternative rules would have said, and is judged
 # again after 1h and 6h (same definition of a bad outcome) besides the usual 24h. Live answers are not changed.
-VERSION = "2.11.1"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -5155,101 +3664,6 @@ async def record_prediction(client: httpx.AsyncClient, r: dict):
         pass
 
 
-async def resolve_due(client: httpx.AsyncClient) -> int:
-    """Judge predictions whose time has come. Returns how many were processed. (v2.9: skips major assets, labels the source; v2.11: counts the shadow rules)"""
-    now = int(time.time())
-    got = await redis_pipe(client, [["ZRANGEBYSCORE", "due", "-inf", now, "LIMIT", 0, RESOLVE_BATCH]])
-    ids = (got or [[]])[0] or []
-    if not ids:
-        return 0
-    hashes = await redis_pipe(client, [["HGETALL", f"pred:{i}"] for i in ids])
-    if hashes is None:
-        return 0
-    cmds: list = []
-    preds: Dict[str, dict] = {}
-    for pid, h in zip(ids, hashes):
-        d = to_dict(h)
-        if d.get("mint"):
-            preds[pid] = d
-        else:
-            cmds.append(["ZREM", "due", pid])  # hash expired: drop the orphan
-    best: Dict[str, Optional[dict]] = {}
-    sol1: Optional[float] = None
-    if preds:
-        mints = sorted({d["mint"] for d in preds.values()})
-        ask = mints if SOL_MINT in mints else mints + [SOL_MINT]
-        t0 = time.time()
-        try:
-            resp = await client.get(DEX_URL.format(mint=",".join(ask)))
-            resp.raise_for_status()
-            pairs = resp.json().get("pairs") or []
-            src_log("dexscreener", True, t0)
-        except (httpx.HTTPError, ValueError):
-            src_log("dexscreener", False, t0)
-            if cmds:
-                await redis_pipe(client, cmds)
-            return 0  # try again next cycle, nothing is lost
-        for m in mints:
-            best[m] = pick_best_pair([p for p in pairs if (p.get("baseToken") or {}).get("address") == m], m)
-        sp = pick_best_pair([p for p in pairs if (p.get("baseToken") or {}).get("address") == SOL_MINT], SOL_MINT)
-        try:
-            sol1 = float(sp.get("priceUsd")) if sp else None
-        except (TypeError, ValueError):
-            sol1 = None
-
-    recent = []
-    for pid, d in preds.items():
-        cmds += [["ZREM", "due", pid], ["DEL", f"pred:{pid}"]]
-        if d["mint"] in MAJOR_ASSETS:
-            continue  # v2.9: SOL and stablecoins are not judged (they would only pad the ok group)
-        age = now - int(d.get("ts") or 0)
-        if age > PRED_HORIZON_S * 3:
-            continue  # judged far too late (server was asleep): would distort the stats
-        p0, l0 = float(d.get("price") or 0), float(d.get("liq") or 0)
-        pair = best.get(d["mint"])
-        if pair is None:
-            ret, liq_ratio = -100.0, 0.0
-        else:
-            p1 = float(pair.get("priceUsd") or 0)
-            l1 = float((pair.get("liquidity") or {}).get("usd") or 0)
-            ret = (p1 / p0 - 1) * 100 if p0 > 0 else 0.0
-            liq_ratio = l1 / l0 if l0 > 0 else 1.0
-        bad = ret <= BAD_RETURN_PCT or liq_ratio <= BAD_LIQ_RATIO
-        # market background: how much did SOL itself move over the same window?
-        sol0 = float(d.get("sol") or 0)
-        sol_ret = (sol1 / sol0 - 1) * 100 if (sol1 and sol0 > 0) else None
-        xret = ret - sol_ret if sol_ret is not None else None
-        v, c = d.get("verdict", "?"), d.get("conf", "?")
-        bucket = min(9, int(float(d.get("score") or 0)) // 10)
-        day = time.strftime("%Y%m%d", time.gmtime(int(d.get("ts") or 0)))
-        flags_t = [f for f in (d.get("flags") or "").split(",") if f in RISK_WEIGHTS]
-        src = d.get("src") or "untagged"  # v2.9: where the request came from; older rows have no label
-        groups = ["all", f"v:{v}:{c}", f"rb:{bucket}", f"d:{day}", f"src:{src}", f"srcv:{src}:{v}"]
-        groups += [f"f:{f}" for f in flags_t] + [f"fd:{f}:{day}" for f in flags_t]
-        base_pred = "avoid" if BASELINE_FLAGS & set((d.get("flags") or "").split(",")) else "ok"
-        groups += [f"vd:{v}:{c}:{day}", f"bl:{base_pred}", f"bd:{base_pred}:{day}"]  # per-day verdicts + the simple baseline
-        groups += [f"sh:{rn}:{sv}" for rn, sv in _parse_shadow(d.get("shadow"))]  # v2.11: what the other rules would have said
-        for g in groups:
-            cmds.append(["HINCRBY", "st", f"{g}:n", 1])
-            if bad:
-                cmds.append(["HINCRBY", "st", f"{g}:bad", 1])
-        cmds.append(["HINCRBYFLOAT", "st", f"v:{v}:{c}:ret", round(ret, 2)])
-        if xret is not None:
-            cmds += [["HINCRBYFLOAT", "st", f"v:{v}:{c}:xret", round(xret, 2)], ["HINCRBY", "st", f"v:{v}:{c}:xn", 1]]
-        recent.append(json.dumps({"token": d.get("token"), "mint": d["mint"], "verdict": v, "risk_score": float(d.get("score") or 0),
-                                  "return_pct": round(ret, 1), "sol_return_pct": round(sol_ret, 1) if sol_ret is not None else None,
-                                  "excess_return_pct": round(xret, 1) if xret is not None else None,
-                                  "bad_outcome": bad, "age_h": round(age / 3600, 1), "src": src}))
-        cmds += _dataset_cmds(d, v, src, ret, liq_ratio, bad)  # v2.11.1: labelled row for later analysis
-    for item in recent:
-        cmds.append(["LPUSH", "recent", item])
-    if recent:
-        cmds.append(["LTRIM", "recent", 0, 49])
-    if cmds:
-        await redis_pipe(client, cmds)
-    return len(ids)
-
-
 _resolve_due_24h = resolve_due
 
 
@@ -5320,17 +3734,6 @@ async def _resolve_early_one(client: httpx.AsyncClient, hours: int, zset: str) -
     return len(ids)
 
 
-async def resolve_due(client: httpx.AsyncClient) -> int:
-    """24h judgments as before, then the early (1h / 6h) ones. Returns how many predictions were processed."""
-    n = await _resolve_due_24h(client)
-    for hours, zset in _EARLY:
-        try:
-            n += await _resolve_early_one(client, hours, zset)
-        except Exception:  # noqa: BLE001
-            pass  # the early checks must never break the 24h track record
-    return n
-
-
 # ---------- /stats and the MCP track record: shadow rules and early horizons ----------
 def _cell(n: int, bad: int) -> dict:
     return {"n": n, "bad_outcome_rate_pct": round(bad / n * 100, 1) if n >= MIN_N_SHOW else None,
@@ -5397,7 +3800,6 @@ print(f"[part24] v{VERSION} shadow rules ({'on' if SHADOW_ENABLED else 'off'}: {
 # ---------- part25: v2.12.0 - /status: a small live status page (reads /health in the browser) ----------
 # Loads before part7. Adds one route and changes nothing else. Seed speed is set with env vars, not here:
 # SEED_MAX_PER_DAY and SEED_INTERVAL_S (keep interval about 86400 / max_per_day so samples spread over the whole day).
-VERSION = "2.12.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -5523,7 +3925,6 @@ print(f"[part25] v{VERSION} /status page ready")
 # ---------- part26: v2.13.6 - /play: polished playground for any Solana token ----------
 # Loads before part7. One route, no new dependency. Calls public /signal + /exit (rate limits apply).
 # All network text is rendered with textContent (never innerHTML) — token names are hostile.
-VERSION = "2.13.6"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -6045,10 +4446,7 @@ print(f"[part26] v{VERSION} playground ready at /play (share a token with /play?
 # Loads before part7. Does nothing unless BOTH env vars are set: TELEGRAM_BOT_TOKEN and TELEGRAM_WEBHOOK_SECRET.
 # Telegram sends updates to /telegram/webhook; the secret header must match, so strangers cannot make the bot send messages.
 # Work runs in the background so the webhook answers at once (Telegram retries slow webhooks and would double the replies).
-import hmac
-import html as _html
 
-VERSION = "2.14.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -6155,15 +4553,11 @@ print(f"[part27] v{VERSION} Telegram bot: {'ON' if all(_tg_cfg()) else 'off (nee
 # Loads before part7. Set WATCH_ENABLED=true to switch it on. Each watched token is re-checked about every WATCH_POLL_S seconds
 # by the resolver loop that already runs (no extra task, no lifespan change). A webhook is called only when something that
 # matters changed. Webhook URLs are checked (https, public address) before use because the server makes the request.
-import hashlib
-import hmac
 import ipaddress
-import json
 import secrets
 import socket
 import urllib.parse
 
-VERSION = "2.15.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -6510,7 +4904,6 @@ print(f"[part28] v{VERSION} watchlist: {'ON' if WATCH_ENABLED else 'off (set WAT
 # ---------- part29: v2.16.0 - /me: your own rate limit and how much of it is used ----------
 # Loads before part7. Reads the in-memory limiter that already exists (no Redis, no new middleware, no extra cost per request).
 # Without a key it only says "free"; it never shows the IP. /whoami is the place for checking how the server sees an IP.
-VERSION = "2.16.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -6543,9 +4936,7 @@ print(f"[part29] v{VERSION} /me ready")
 # ---------- part30: v2.17.0 - /start onboarding page and llms.txt additions (numbers come from the live settings) ----------
 # Loads before part7. Replaces nothing: /pricing, /llms.txt and the MCP tools stay as they are. This part only adds a short
 # onboarding page and appends accurate sections to llms.txt. A link is shown only when its page exists on this server.
-import html as _html
 
-VERSION = "2.17.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -6625,11 +5016,8 @@ print(f"[part30] v{VERSION} /start onboarding page and llms.txt additions ready"
 # Loads before part7. Each judged verdict leaves one row: the numbers the verdict was based on, our labels, and what happened
 # after 1h, 6h and 24h. No mint and no token name. Needs ADMIN_SECRET; without it the routes answer 404 as if they did not exist.
 import csv
-import hmac
 import io
-import json
 
-VERSION = "2.19.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -6712,7 +5100,6 @@ print(f"[part32] v{VERSION} /dataset.csv ready ({'admin key set' if os.getenv('A
 # Loads before part7. Built on the live engine: the English reasons come from REASONS, the points from ACTIVE_WEIGHTS (so they follow
 # the auto-tuning), which flags force the verdict is read from the decision object the engine already produced, and the score
 # rule is the engine's own: score = min(100, sum of the points of the flags that are scored). Nothing here changes /signal.
-VERSION = "2.20.0"
 app.version = VERSION
 app.openapi_schema = None
 
@@ -7119,3 +5506,5 @@ async def classic_home():
 
 
 print(f"[part31] v{VERSION} new landing page at / (old home at /classic)")
+
+# --- slim: VERSION unified (kept last value) ---
