@@ -15,15 +15,7 @@ try:
 except Exception as e:
     print(f"[loader] patch_stats_fix NOT applied: {e}")
 
-# 3) Filter v4.1 - hard vetoes + scoring (mới)
-try:
-    import patch_filter_v4
-    patch_filter_v4.apply(g)
-    print("[loader] patch_filter_v4 applied")
-except Exception as e:
-    print(f"[loader] patch_filter_v4 NOT applied: {e}")
-
-# 4) Expose app for Render / uvicorn
+# 3) Expose app for Render / uvicorn
 app = g.get("app")
 if app is None:
     raise RuntimeError("app not found after loading core.py")
