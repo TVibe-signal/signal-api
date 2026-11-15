@@ -9978,6 +9978,191 @@ async def ops_rules_changelog():
 print("[part156] v%s RULES_VERSION=%s avoid@%s weight cuts + ok-not-buy" % (VERSION, RULES_VERSION, _AVOID_AT))
 
 
+
+# --- part157: harden /stats + public methodology page + verdict history page ---
+VERSION = "3.0.27"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+from fastapi.responses import HTMLResponse, JSONResponse
+import json as _json_157
+
+# --- Harden GET /stats: never 500 the public track record ---
+try:
+    for r in list(getattr(app, "routes", []) or []):
+        if getattr(r, "path", None) == "/stats" and hasattr(r, "endpoint"):
+            _stats_chain = r.endpoint
+
+            async def stats_never_500():
+                try:
+                    out = await _stats_chain()
+                    if isinstance(out, dict):
+                        out.setdefault("app_version", VERSION)
+                        out.setdefault("public", True)
+                        return out
+                    return out
+                except Exception as e:
+                    # Fallback: bias/horizons-shaped minimal payload so agents still verify
+                    soft = {
+                        "enabled": True,
+                        "available": False,
+                        "error": "stats_partial",
+                        "detail": str(e)[:200],
+                        "app_version": VERSION,
+                        "hint": "Try GET /stats/bias, /stats/horizons, /ledger; full /stats recovering",
+                        "public_verify": {
+                            "ledger": "GET /ledger",
+                            "methodology": "GET /methodology",
+                            "history_ui": "GET /history",
+                        },
+                        "nfa": True,
+                    }
+                    try:
+                        # best-effort pull satellite endpoints if defined
+                        pass
+                    except Exception:
+                        pass
+                    return JSONResponse(soft, status_code=200)
+
+            r.endpoint = stats_never_500
+            break
+except Exception as e:
+    print("[part157] stats harden:", str(e)[:80])
+
+
+_METHODOLOGY_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>TVibe Signal — Methodology</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#0b0f14;color:#e8eef5;margin:0;padding:1.2rem;line-height:1.45}
+a{color:#6cb6ff} code{background:#1a2330;padding:.1rem .35rem;border-radius:4px}
+.card{background:#121a24;border:1px solid #243041;border-radius:12px;padding:1rem;margin:1rem 0}
+h1{font-size:1.25rem;margin:0 0 .5rem} h2{font-size:1rem;margin:1rem 0 .4rem;color:#9db0c5}
+.muted{color:#8a9bb0;font-size:.9rem}
+</style>
+</head>
+<body>
+<h1>TVibe Signal — Public methodology</h1>
+<p class="muted">How verdicts are produced. Not financial advice. Machine JSON: <a href="/methodology"><code>/methodology</code></a></p>
+<div class="card">
+<h2>Verdict ladder</h2>
+<p><code>avoid</code> / <code>caution</code> / <code>ok</code> from risk flags + score thresholds.
+Current score gates are published on <a href="/rules">/rules</a> and <a href="/ops/rules-changelog">/ops/rules-changelog</a>.</p>
+<p><strong>ok</strong> means no strong risk flags at snapshot — <em>not</em> a buy signal.</p>
+</div>
+<div class="card">
+<h2>Track record</h2>
+<p>Outcomes are measured on <a href="/stats"><code>/stats</code></a> under a fixed <code>rules_version</code>.
+Compare precision only within the same version. Base rate matters: most random mints are already bad.</p>
+</div>
+<div class="card">
+<h2>Verify snapshots</h2>
+<p>Hash-chained ledger: <a href="/ledger"><code>/ledger</code></a> · human table: <a href="/history"><code>/history</code></a></p>
+</div>
+<p class="muted">NFA · free fair use · <a href="/">home</a></p>
+</body></html>
+"""
+
+
+@app.get("/methodology.html", response_class=HTMLResponse, tags=["product"], summary="Human methodology page")
+async def methodology_html_page():
+    return HTMLResponse(_METHODOLOGY_HTML)
+
+
+_HISTORY_HTML = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>TVibe — Verdict history</title>
+<style>
+body{font-family:system-ui,sans-serif;background:#0b0f14;color:#e8eef5;margin:0;padding:1rem;line-height:1.4}
+a{color:#6cb6ff}
+table{width:100%;border-collapse:collapse;font-size:.82rem}
+th,td{border-bottom:1px solid #243041;padding:.45rem .35rem;text-align:left;vertical-align:top}
+th{color:#9db0c5;font-weight:600}
+.v-avoid{color:#ff7b7b}.v-caution{color:#ffd27a}.v-ok{color:#7dffa6}
+.muted{color:#8a9bb0;font-size:.88rem}
+.mono{font-family:ui-monospace,monospace;font-size:.75rem;word-break:break-all}
+.card{background:#121a24;border:1px solid #243041;border-radius:12px;padding:.8rem;margin:.8rem 0}
+</style>
+</head>
+<body>
+<h1 style="font-size:1.2rem;margin:0 0 .4rem">Verdict history</h1>
+<p class="muted">Public hash-chained snapshots from <code>/ledger</code>. Anyone can recompute hashes (see ledger <code>how_to_verify</code>). NFA.</p>
+<div class="card muted" id="meta">Loading…</div>
+<div style="overflow:auto">
+<table>
+<thead><tr><th>Time</th><th>Verdict</th><th>Risk</th><th>Token</th><th>Mint</th><th>Flags</th><th>Hash</th></tr></thead>
+<tbody id="rows"><tr><td colspan="7">…</td></tr></tbody>
+</table>
+</div>
+<p class="muted"><a href="/ledger">Raw JSON /ledger</a> · <a href="/methodology.html">Methodology</a> · <a href="/stats">Stats</a> · <a href="/">Home</a></p>
+<script>
+function vc(v){v=(v||'').toLowerCase();return 'v-'+(v==='avoid'||v==='caution'||v==='ok'?v:'caution')}
+function short(s,n){s=String(s||'');return s.length<=n?s:s.slice(0,n)+'…'}
+fetch('/ledger').then(r=>r.json()).then(d=>{
+  const meta=document.getElementById('meta');
+  meta.innerHTML='head <span class="mono">'+short(d.head,18)+'</span> · kept '+(d.total_kept||'?')+' · showing '+(d.returned|| (d.entries||[]).length);
+  const rows=(d.entries||[]);
+  const tb=document.getElementById('rows');
+  if(!rows.length){tb.innerHTML='<tr><td colspan="7">No entries</td></tr>';return}
+  tb.innerHTML=rows.map(e=>{
+    const ts=e.ts?new Date((e.ts<2e10?e.ts*1000:e.ts)).toISOString().replace('T',' ').slice(0,19)+'Z':"";
+    const flags=(e.flags||[]).slice(0,6).join(', ');
+    return '<tr><td>'+ts+'</td><td class="'+vc(e.verdict)+'">'+(e.verdict||'')+'</td><td>'+(e.risk_score??'')+'</td><td>'+short(e.token||'',16)+'</td><td class="mono">'+short(e.mint||'',12)+'</td><td>'+short(flags,40)+'</td><td class="mono">'+short(e.hash||'',14)+'</td></tr>';
+  }).join('');
+}).catch(e=>{document.getElementById('meta').textContent='Failed to load /ledger: '+e});
+</script>
+</body></html>
+"""
+
+
+@app.get("/history", response_class=HTMLResponse, tags=["product"], summary="Public verdict history (from ledger)")
+@app.get("/verdict-history", response_class=HTMLResponse, include_in_schema=False)
+async def verdict_history_page():
+    return HTMLResponse(_HISTORY_HTML)
+
+
+# Point home/llms at new pages (best-effort)
+try:
+    for r in list(getattr(app, "routes", []) or []):
+        if getattr(r, "path", None) in ("/llms.txt", "/llms") and hasattr(r, "endpoint"):
+            _ll = r.endpoint
+
+            async def llms_history_wrap():
+                res = await _ll()
+                body = res if isinstance(res, str) else None
+                if body is None and hasattr(res, "body"):
+                    try:
+                        body = res.body.decode() if isinstance(res.body, (bytes, bytearray)) else str(res.body)
+                    except Exception:
+                        body = None
+                if body is None or "Verdict history" in body:
+                    return res
+                extra = (
+                    "\n\n## Public verify\n"
+                    "- Track record: GET /stats\n"
+                    "- Methodology: GET /methodology and /methodology.html\n"
+                    "- Verdict history UI: GET /history (data from /ledger)\n"
+                )
+                from starlette.responses import PlainTextResponse
+                return PlainTextResponse(body.rstrip() + extra, media_type="text/plain; charset=utf-8")
+
+            r.endpoint = llms_history_wrap
+            break
+except Exception as e:
+    print("[part157] llms:", str(e)[:60])
+
+print("[part157] v%s /stats harden + /methodology.html + /history" % VERSION)
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
