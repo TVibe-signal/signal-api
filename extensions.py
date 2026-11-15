@@ -9742,6 +9742,242 @@ async def ops_overall_status():
 print("[part155] v%s seed empty=soft + /ops/status" % VERSION)
 
 
+
+# --- part156: score_35 promote + low-lift weight cut + ok-not-buy (rules_version bump) ---
+# Data-driven (track-record): avoid@50 left many bads in caution; shadow score_35
+# kept avoid precision while lifting recall. Low-lift flags had high prior weights.
+VERSION = "3.0.26"
+RULES_VERSION = "2026.11.15.a"
+try:
+    app.version = VERSION
+    app.openapi_schema = None
+except Exception:
+    pass
+
+# Live score thresholds (shadow score_35 promoted)
+_AVOID_AT = 35
+_CAUTION_AT = 25
+globals()["_AVOID_AT"] = _AVOID_AT
+globals()["_CAUTION_AT"] = _CAUTION_AT
+
+# Cut priors that measured lift <= ~1 (or protective / noise)
+_WEIGHT_CUTS = {
+    "lp_not_locked": 8,       # was ~25, lift ~0.95
+    "low_liquidity": 6,       # was ~15, lift ~0.80
+    "heavy_selling": 5,       # was ~10, lift ~0.85
+    "lp_unverified": 5,       # was ~10, lift ~0.80
+    "lp_partially_locked": 2, # was ~10, lift ~0.45 (protective → near zero)
+}
+
+try:
+    rw = globals().get("RISK_WEIGHTS")
+    aw = globals().get("ACTIVE_WEIGHTS")
+    if isinstance(rw, dict):
+        for k, v in _WEIGHT_CUTS.items():
+            if k in rw:
+                rw[k] = v
+            else:
+                rw.setdefault(k, v)
+    if isinstance(aw, dict):
+        for k, v in _WEIGHT_CUTS.items():
+            aw[k] = v
+    print("[part156] weights cut:", _WEIGHT_CUTS)
+except Exception as e:
+    print("[part156] weights:", str(e)[:80])
+
+globals()["RULES_VERSION"] = RULES_VERSION
+
+
+def _remap_verdict_score35(result: dict) -> dict:
+    """Apply avoid@35 / caution@25 on top of hard avoid flags already in result."""
+    if not isinstance(result, dict):
+        return result
+    try:
+        score = result.get("risk_score")
+        if score is None and isinstance(result.get("decision"), dict):
+            score = result["decision"].get("risk_score")
+        score = float(score) if score is not None else None
+    except (TypeError, ValueError):
+        score = None
+
+    flags = set(result.get("flags") or [])
+    dec = result.get("decision") if isinstance(result.get("decision"), dict) else {}
+    # Preserve explicit hard avoid if already avoid for non-score reasons
+    old_v = (result.get("verdict") or dec.get("verdict") or "").lower()
+
+    hard_avoid = old_v == "avoid" and score is not None and score < _AVOID_AT
+    # hard flags that should stay avoid even if score low
+    hard_flag_avoid = bool(flags & {
+        "mint_authority_active", "freeze_authority_active",
+        "extreme_holder_concentration", "dump_risk",
+    })
+
+    if score is None:
+        new_v = old_v or "caution"
+    elif hard_flag_avoid or (score >= _AVOID_AT) or hard_avoid:
+        new_v = "avoid"
+    elif score >= _CAUTION_AT:
+        new_v = "caution"
+    else:
+        new_v = "ok"
+
+    result["verdict"] = new_v
+    result["rules_version"] = RULES_VERSION
+    result["scoring_thresholds"] = {
+        "avoid_at": _AVOID_AT,
+        "caution_at": _CAUTION_AT,
+        "promoted_from_shadow": "score_35",
+        "previous_avoid_at": 50,
+    }
+    if isinstance(dec, dict):
+        dec["verdict"] = new_v
+        dec["rules_version"] = RULES_VERSION
+        result["decision"] = dec
+
+    # Re-score lightly if flags present and ACTIVE_WEIGHTS available
+    try:
+        aw = globals().get("ACTIVE_WEIGHTS") or {}
+        if flags and isinstance(aw, dict):
+            s2 = min(100, sum(int(aw.get(f, 0) or 0) for f in flags))
+            # only replace if we have flag-based score machinery
+            if s2 > 0 and (result.get("risk_score") is not None):
+                # keep max of engine score and recomputed so we don't under-rank
+                try:
+                    result["risk_score"] = max(float(result.get("risk_score") or 0), float(s2))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return result
+
+
+_build_prev_156 = globals().get("build_signal")
+if callable(_build_prev_156):
+    async def build_signal(client, mint, security, *args, **kwargs):
+        res = await _build_prev_156(client, mint, security, *args, **kwargs)
+        try:
+            if isinstance(res, tuple) and len(res) == 2 and isinstance(res[0], dict):
+                return _remap_verdict_score35(res[0]), res[1]
+            if isinstance(res, dict):
+                return _remap_verdict_score35(res)
+        except Exception:
+            pass
+        return res
+
+
+_av156 = globals().get("_tvibe_agent_view")
+if callable(_av156):
+    def _tvibe_agent_view(pkt: dict) -> dict:
+        out = _av156(pkt)
+        if not isinstance(out, dict) or out.get("error"):
+            return out
+        out["rules_version"] = RULES_VERSION
+        out["version"] = VERSION
+        out["ok_is_not_a_buy_signal"] = True
+        out.setdefault(
+            "ok_meaning",
+            "ok = no strong risk flags at snapshot — not a buy recommendation; still NFA",
+        )
+        # Align action with remapped verdict when possible
+        v = (out.get("verdict") or "").lower()
+        filt = out.get("filter") if isinstance(out.get("filter"), dict) else {}
+        unk = out.get("unknowns") or []
+        if v == "avoid":
+            out["action"] = "skip"
+            if isinstance(filt, dict):
+                filt["pass"] = False
+                out["filter"] = filt
+        elif v == "caution" or unk:
+            out["action"] = "review"
+            if isinstance(filt, dict):
+                filt["pass"] = False
+                out["filter"] = filt
+        elif v == "ok" and filt.get("pass") is True and not unk:
+            out["action"] = "pass"
+            out.setdefault("cautions", [])
+            c = list(out.get("cautions") or [])
+            tip = "ok is not a buy signal — only a cleared risk gate"
+            if tip not in c:
+                c.append(tip)
+            out["cautions"] = c[:8]
+        return out
+
+
+# Stats display: re-apply CI scale + null bogus 0.0 returns on buckets (idempotent)
+try:
+    _stats_prev = None
+    for r in list(getattr(app, "routes", []) or []):
+        if getattr(r, "path", None) == "/stats" and hasattr(r, "endpoint"):
+            _stats_prev = r.endpoint
+
+            async def stats_display_fix():
+                out = await _stats_prev()
+                if not isinstance(out, dict):
+                    return out
+                def scale_ci(o):
+                    if isinstance(o, dict):
+                        for k, v in list(o.items()):
+                            if k.endswith("ci95_pct") and isinstance(v, list) and any(
+                                isinstance(x, (int, float)) and x > 100 for x in v
+                            ):
+                                o[k] = [round(float(x) / 100.0, 1) if isinstance(x, (int, float)) else x for x in v]
+                            else:
+                                scale_ci(v)
+                    elif isinstance(o, list):
+                        for x in o:
+                            scale_ci(x)
+                scale_ci(out)
+                for b in out.get("by_risk_bucket") or []:
+                    if not isinstance(b, dict):
+                        continue
+                    if b.get("avg_return_pct") == 0.0 and b.get("avg_excess_return_pct") in (None, 0.0):
+                        b["avg_return_pct"] = None
+                        b.setdefault("note", "avg_return not measured for this bucket")
+                ma = out.get("market_adjustment")
+                if isinstance(ma, dict) and isinstance(ma.get("avg_return_pct"), (int, float)):
+                    if abs(ma["avg_return_pct"]) > 500:
+                        ma["avg_return_pct_mean_hidden"] = ma["avg_return_pct"]
+                        ma["avg_return_pct"] = None
+                        ma["note"] = "mean distorted by outliers; prefer median when exposed"
+                out["rules_version"] = RULES_VERSION
+                out["rules_changelog"] = {
+                    "from": "2026.10.28.a",
+                    "to": RULES_VERSION,
+                    "changes": [
+                        "avoid score threshold 50 → 35 (promote shadow score_35)",
+                        "cut low-lift flag weights: lp_not_locked, low_liquidity, heavy_selling, lp_unverified, lp_partially_locked",
+                        "agent: ok_is_not_a_buy_signal",
+                    ],
+                }
+                return out
+
+            r.endpoint = stats_display_fix
+            break
+except Exception as e:
+    print("[part156] stats:", str(e)[:80])
+
+
+@app.get("/ops/rules-changelog", tags=["ops"], summary="Latest rules_version changes")
+async def ops_rules_changelog():
+    return {
+        "rules_version": RULES_VERSION,
+        "app_version": VERSION,
+        "avoid_at": _AVOID_AT,
+        "caution_at": _CAUTION_AT,
+        "weight_cuts": _WEIGHT_CUTS,
+        "rationale": {
+            "avoid_threshold": "Shadow score_35 kept avoid precision while improving recall vs avoid@50",
+            "weights": "Flags with lift<=~1 or protective noise had priors too high",
+            "ok": "ok remains 'no strong flags', not a buy signal",
+        },
+        "compare": "Only compare /stats within the same rules_version",
+        "nfa": True,
+    }
+
+
+print("[part156] v%s RULES_VERSION=%s avoid@%s weight cuts + ok-not-buy" % (VERSION, RULES_VERSION, _AVOID_AT))
+
+
 # --- part7 ---
 # ---------- MCP server (remote, Streamable HTTP at /mcp) ----------
 # Lets Claude and other MCP agents call the API as tools.
