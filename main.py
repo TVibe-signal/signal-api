@@ -27,3 +27,9 @@ try:
     patch_p0.apply(globals())
 except Exception as e:
     print(f"[loader] patch_p0 not applied: {e}")
+# Stats fix - thay /stats bi loi AsyncClient.app
+try:
+    import patch_stats_fix
+    patch_stats_fix.apply(globals())
+except Exception as e:
+    print(f"[loader] patch_stats_fix not applied: {e}")
