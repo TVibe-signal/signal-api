@@ -1,4 +1,8 @@
-"""main.py — TVibe Signal API thin loader. Order matters."""
+"""main.py — TVibe Signal API thin loader. Order matters.
+FIX 16/11: load core_final (TVibe FILTER 2070 + /omni), NOT old core.py.
+Render Start Command MUST be: uvicorn main:app --host 0.0.0.0 --port $PORT
+If Render still runs `uvicorn core:app`, this file is ignored and web stays old.
+"""
 from __future__ import annotations
 
 import os
@@ -28,9 +32,9 @@ def _exec_module_file(path: str, g: dict, label: str) -> None:
 
 
 # 1) Core — FastAPI app + base /signal /stats
-import core  # noqa: F401
+import core_final as core  # noqa: F401  # FIX: old core.py has no FILTER/2070/no /omni
 
-g = dict(vars(core))
+g = dict(vars(core))  # core_final already has FILTER landing + /omni
 g["__name__"] = "__main__"
 g["__file__"] = os.path.join(ROOT, "main.py")
 
