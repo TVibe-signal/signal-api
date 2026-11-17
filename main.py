@@ -94,3 +94,13 @@ if app is None:
 globals().update(g)
 
 print("[loader] ready app=%s version=%s" % (type(app).__name__, g.get("VERSION") or getattr(app, "version", "?")))
+
+# === Dán block này vào CUỐI main.py (sau mọi patch khác) ===
+
+# FINAL safety: /omni + live homepage + health never-500
+try:
+    import patch_live_fix
+    patch_live_fix.apply(g)
+    print("[loader] patch_live_fix applied")
+except Exception as e:
+    print(f"[loader] patch_live_fix NOT applied: {e}")
