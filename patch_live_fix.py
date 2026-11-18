@@ -312,4 +312,9 @@ def apply(g: dict) -> None:
     g.setdefault("omni_impl", _omni_impl_sync)
     global _ENGINE
     _ENGINE = g.get("full_builder") or _dex_fallback_sync
-    print("[patch_live_fix] engi
+        print("[patch_live_fix] engine:", "deep (patch_builder)" if g.get("full_builder") else "lite fallback")
+    app = g.get("app")
+    if app is not None and not isinstance(app, LiveFixASGI):
+        version = g.get("VERSION") or getattr(app, "version", None) or "live-fix"
+        g["app"] = LiveFixASGI(app, version)
+    print("[patch_live_fix] applied v22 (omni fallback + agent spec + asgi wrapper)")
