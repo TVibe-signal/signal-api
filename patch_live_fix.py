@@ -1,4 +1,4 @@
-"""patch_live_fix.py — MINI v7 (paste-safe, ~150 lines).
+"""patch_live_fix.py — MINI v8 (paste-safe, ~150 lines).
 Replace ENTIRE content of patch_live_fix.py on GitHub with this file.
 Fixes vs v4-mini:
 - v4 only rewrote ?request= (killed the 422) but NEVER touched /omni.
@@ -88,16 +88,42 @@ def _register(g):
     print("[patch_live_fix] /omni + /play registered (v6, builder wrapped)")
 
 class LiveFixASGI:
-    def __init__(self, inner, version):
+    def __init__(self, inner, version, g=None):
         self.inner = inner
         self.version = version
+        self.g = g or {}
     def __getattr__(self, name):
         return getattr(self.inner, name)
     async def __call__(self, scope, receive, send):
         if scope.get("type") == "http" and scope.get("path") == "/__main_status":
-            body = json.dumps({"main_py": "v4", "patch_live_fix": "v7-mini",
+            body = json.dumps({"main_py": "v4", "patch_live_fix": "v8-mini",
                                "fix": "omni/play builder wrapped, never 500"}).encode()
             await _send(send, 200, [(b"cache-control", b"no-store")], body, b"application/json")
+            return
+        # v8: answer /omni + /play HERE at ASGI level. Route registration
+        # in _register silently fails once the app is wrapped, leaving
+        # /omni at FastAPI 404 {"detail": "Not Found"}. This bypasses
+        # routing entirely — same trick that makes /__main_status work.
+        if scope.get("type") == "http" and scope.get("method") == "GET" \
+                and scope.get("path") in ("/omni", "/play"):
+            try:
+                from urllib.parse import parse_qsl
+                d = dict(parse_qsl(scope.get("query_string", b"").decode("latin-1"),
+                                   keep_blank_values=True))
+                m = (d.get("mint") or d.get("request") or "").strip()
+                if not m:
+                    out = {"error": "mint is required: /omni?mint=<MINT>", "mint": None}
+                elif not MINT_RE.match(m):
+                    out = {"error": "Invalid Solana token mint address", "mint": m}
+                else:
+                    import httpx
+                    async with httpx.AsyncClient(timeout=25.0) as client:
+                        out = await _build(self.g, client, m)
+            except Exception as e:
+                out = {"mint": "", "error": f"upstream_or_no_pair: {e}"[:240],
+                       "action": "review", "verdict": "review", "nfa": True}
+            await _send(send, 200, [(b"cache-control", b"no-store")],
+                        json.dumps(out).encode(), b"application/json")
             return
         if scope.get("type") == "http" and scope.get("method") == "GET" \
                 and scope.get("path") in ("/omni", "/play", "/signal", "/signals"):
@@ -156,5 +182,5 @@ def apply(g: dict) -> None:
     app = g.get("app")
     if app is not None and not isinstance(app, LiveFixASGI):
         version = g.get("VERSION") or getattr(app, "version", None) or "live-fix"
-        g["app"] = LiveFixASGI(app, version)
-    print("[patch_live_fix] applied v7-mini (ASGI wrapper + /omni /play never-500)")
+        g["app"] = LiveFixASGI(app, version, g)
+    print("[patch_live_fix] applied v8-mini (ASGI wrapper + /omni /play never-500)")
