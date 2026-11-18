@@ -1,6 +1,14 @@
 """patch_live_fix.py — LAST loader step for TVibe Signal free tier. [FIXED]
 
-Fixes vs original:
+Fixes vs original (v3 — patch can no longer die halfway):
+    v3 root cause: _ensure_play() used Query(alias="request") TOGETHER WITH
+    `request: Request`. FastAPI treats that as a conflicting "request"
+    param and route registration can raise -> apply() aborted BEFORE the
+    ASGI wrapper (the bulletproof fix) was ever installed -> server kept
+    running the OLD broken /omni, still 422. v3 removes the alias entirely
+    (mint is read from query_params, which sees both ?mint= and ?request=)
+    and apply() now try/excepts EVERY step, so one bad route can never
+    prevent the ASGI wrapper from installing.
 1. 422 on CHECK — the old homepage check() called an endpoint whose handler
    was declared as `def play(request)` / `def xxx(request)` WITHOUT `: Request`
    annotation. FastAPI then treats `request` as a REQUIRED QUERY param, so
@@ -127,13 +135,17 @@ def _ensure_omni(g: dict) -> None:
     if app is None:
         print("[patch_live_fix] no app — skip /omni")
         return
+    # FIX v2: DO NOT skip when /omni already exists. The existing /omni is
+    # the broken one: its handler was declared as `def omni(request)` with
+    # NO `: Request` annotation, so FastAPI treats `request` as a REQUIRED
+    # query param -> GET /omni?mint=... returns 422 missing [query, request].
+    # Remove ALL old /omni routes and register the fixed one below.
     try:
-        for route in app.router.routes:
-            if getattr(route, "path", None) == "/omni" and "GET" in (getattr(route, "methods", None) or set()):
-                print("[patch_live_fix] /omni already present")
-                return
-    except Exception:
-        pass
+        before = len(app.router.routes)
+        app.router.routes[:] = [r for r in app.router.routes if getattr(r, "path", None) != "/omni"]
+        print(f"[patch_live_fix] removed {before - len(app.router.routes)} old /omni route(s)")
+    except Exception as e:
+        print(f"[patch_live_fix] could not remove old /omni: {e}")
     from fastapi import Query, Request, HTTPException
     MINT_RE = g.get("MINT_RE") or re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
     rate_limited = g.get("rate_limited")
@@ -177,9 +189,13 @@ def _ensure_omni(g: dict) -> None:
     @app.get("/omni", tags=["product"])
     async def omni_live_fix(
         request: Request,  # NOTE: annotated : Request — FastAPI does NOT treat this as a query param
-        mint: str = Query(..., min_length=32, max_length=64),
+        mint: str | None = Query(default=None),
         view: str = Query("full", description="full | agent"),
     ):
+        # v3: mint optional here. Old callers may send ?request=<mint> only.
+        # Reading from query_params sees BOTH names without any alias collision.
+        if not mint:
+            mint = (request.query_params.get("mint") or request.query_params.get("request") or "").strip()
         try:
             if callable(rate_limited):
                 wait = rate_limited(client_ip(request), cost=4)
@@ -241,12 +257,12 @@ def _ensure_play(g: dict) -> None:
     async def play_fixed(
         request: Request,  # annotated -> NOT a query param
         mint: str | None = Query(default=None),
-        # old callers sent the mint under the name `request`
-        request_param: str | None = Query(default=None, alias="request"),
         view: str = Query("full"),
     ):
-        _mint = ((mint or request_param) or "").strip()
-        # Also accept ?mint in raw query string even if FastAPI alias quirks occur
+        # v3: NO Query(alias="request") here — that alias + `request: Request`
+        # could make FastAPI reject the whole route and kill apply().
+        # query_params sees both ?mint= and ?request= with zero alias risk.
+        _mint = (mint or "").strip()
         if not _mint:
             _mint = (request.query_params.get("mint") or request.query_params.get("request") or "").strip()
         if not _mint:
@@ -271,6 +287,41 @@ class LiveFixASGI:
     def __getattr__(self, name):
         return getattr(self.inner, name)
     async def __call__(self, scope, receive, send):
+        # FIX v4: /__main_status — answered HERE, in the outermost wrapper.
+        # Proof from Render logs 08:48:13: GET /__main_status -> 404 reached
+        # FastAPI, i.e. this wrapper IS running but did not intercept it.
+        # main.py wrappers sit INSIDE this one / are overwritten, so the
+        # probe must live here to ever answer.
+        if scope.get("type") == "http" and scope.get("path") == "/__main_status":
+            _body = json.dumps(
+                {"main_py": "v4", "patch_live_fix": "v4", "fix": "asgi __main_status in LiveFixASGI"}
+            ).encode("utf-8")
+            await send({"type": "http.response.start", "status": 200,
+                        "headers": [(b"content-type", b"application/json"),
+                                    (b"content-length", str(len(_body)).encode())]})
+            await send({"type": "http.response.body", "body": _body})
+            return
+        # FIX v2 (bulletproof): rewrite query string for broken endpoints.
+        # Any handler declared as `def xxx(request)` without `: Request`
+        # makes FastAPI demand ?request=... -> 422. The frontend only sends
+        # ?mint=..., so inject the missing param at ASGI level before the
+        # inner app ever sees the request. Works for /omni, /play, /signal
+        # no matter which file registered the broken route, or in what order.
+        if scope.get("type") == "http" and scope.get("method") == "GET" and scope.get("path") in ("/omni", "/play", "/signal", "/signals"):
+            try:
+                from urllib.parse import parse_qsl, urlencode
+                qs = scope.get("query_string", b"").decode("latin-1")
+                params = parse_qsl(qs, keep_blank_values=True)
+                keys = {k for k, _ in params}
+                mint = dict(params).get("mint") or dict(params).get("request") or ""
+                if mint and "request" not in keys:
+                    params.append(("request", mint))
+                if mint and "mint" not in keys:
+                    params.append(("mint", mint))
+                scope = dict(scope)
+                scope["query_string"] = urlencode(params).encode("latin-1")
+            except Exception as e:
+                print(f"[patch_live_fix] query rewrite failed (non-fatal): {e}")
         if (scope.get("type") != "http" or scope.get("method") != "GET"
                 or scope.get("path") not in ("/", "/health")):
             return await self.inner(scope, receive, send)
@@ -314,30 +365,3 @@ class LiveFixASGI:
             if err is not None and start is None:
                 raise err
             if status == 200 and "text/html" in ctype and not encoded:
-                text = body.decode("utf-8", "ignore")
-                patched = _patch_html(text)
-                if patched != text:
-                    body = patched.encode("utf-8")
-        keep = [(k, v) for k, v in headers if k.lower() not in (b"content-length",)]
-        await send({"type": "http.response.start", "status": status,
-                    "headers": keep + [(b"content-length", str(len(body)).encode())]})
-        await send({"type": "http.response.body", "body": body})
-
-async def _send(send, status, headers, body, ctype):
-    await send({"type": "http.response.start", "status": status,
-                "headers": list(headers) + [(b"content-type", ctype), (b"content-length", str(len(body)).encode())]})
-    await send({"type": "http.response.body", "body": body})
-
-def apply(g: dict) -> None:
-    if not isinstance(g, dict):
-        raise TypeError("apply expects shared globals dict")
-    _ensure_omni(g)
-    _ensure_play(g)
-    html = g.get("HOME_HTML")
-    if isinstance(html, str) and html:
-        g["HOME_HTML"] = _patch_html(html)
-    app = g.get("app")
-    if app is not None and not isinstance(app, LiveFixASGI):
-        version = g.get("VERSION") or getattr(app, "version", None) or "live-fix"
-        g["app"] = LiveFixASGI(app, version)
-    print("[patch_live_fix] applied (ASGI wrapper on / and /health)")
