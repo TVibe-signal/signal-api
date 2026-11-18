@@ -1,25 +1,23 @@
-"""patch_live_fix.py — LAST loader step for TVibe Signal free tier.
+"""patch_live_fix.py — LAST loader step for TVibe Signal free tier. [FIXED]
 
-Guarantees (even if older core / partial loader):
-1. GET /omni exists (alias -> build_omni / build_signal) if nothing registered it
-2. Homepage check() is ALWAYS the live version (calls /omni, never the hash() demo),
-   with correct verdict mapping (ok/caution/avoid -> PASS/REVIEW/SKIP) and clear errors
-3. GET /health never returns 500 (the existing /health is KEPT; a fallback JSON with the error note is used on failure)
-
-Implemented as a pure-ASGI wrapper around the app (no add_middleware, so it cannot fail with
-"cannot add middleware after app started"). main.py exports the wrapped app.
-
-Wired in main.py AFTER all other patches. NFA. Lean only.
+Fixes vs original:
+1. 422 on CHECK — the old homepage check() called an endpoint whose handler
+   was declared as `def play(request)` / `def xxx(request)` WITHOUT `: Request`
+   annotation. FastAPI then treats `request` as a REQUIRED QUERY param, so
+   `GET /play?mint=...` -> 422 [{"loc":["query","request"],"msg":"Field required"}].
+   Fix: (a) register a tolerant /play here that accepts BOTH ?mint= and
+   ?request=, (b) make the homepage check() always call /omni?mint=...
+2. Homepage was NEVER patched on the live page — _patch_html() returned
+   unchanged unless the exact string "function fill(m){...}" was present.
+   The live page in the screenshot uses a CHECK button, not fill(), so the
+   old buggy check() survived. Fix: patch ANY `function check(){...}`,
+   and inject LIVE_JS when the page has #mint / #out but no check().
+3. /health NameError mcp_error — handled in main.py (setdefault), this file
+   keeps the never-500 fallback.
 """
 from __future__ import annotations
+import json, re, time
 
-import json
-import re
-import time
-
-# ---------------------------------------------------------------------------
-# LIVE homepage JS (replaces demo / older live check())
-# ---------------------------------------------------------------------------
 LIVE_JS = r"""
 async function check(){
   const m=(document.getElementById('mint').value||'').trim();
@@ -76,20 +74,52 @@ async function check(){
 }
 """
 
-# Only touch the landing page that has the shared fill()/check() pair (never other pages).
 _SIGNATURE = "function fill(m){document.getElementById('mint').value=m;check();}"
 _CHECK_RE = re.compile(r"(?:async\s+)?function check\(\)\{.*?(?=</script>)", re.S)
-
+# Also match: function check(){...} followed by </script> OR next function / end
+_CHECK_RE2 = re.compile(r"(?:async\s+)?function check\s*\(\)\s*\{", re.S)
 
 def _patch_html(text: str) -> str:
-    if not text or _SIGNATURE not in text:
+    if not text:
         return text
-    new_text, n = _CHECK_RE.subn(lambda _m: LIVE_JS.strip(), text, count=1)
-    if n:
-        return new_text
+    # 1) Old behaviour: exact fill() signature page
+    if _SIGNATURE in text:
+        new_text, n = _CHECK_RE.subn(lambda _m: LIVE_JS.strip(), text, count=1)
+        if n:
+            return new_text
+    # 2) FIX: ANY page with a check() function (CHECK-button page in screenshot)
+    # Replace from "function check()" up to the matching closing of that function.
+    # Simple robust approach: replace up to </script> if check() is the last function,
+    # otherwise fall back to regex above.
+    if "function check" in text:
+        new_text, n = _CHECK_RE.subn(lambda _m: LIVE_JS.strip(), text, count=1)
+        if n:
+            return new_text
+        # check() is not followed by </script> on this page — splice by brace counting
+        m = _CHECK_RE2.search(text)
+        if m:
+            i, depth = m.start(), 0
+            j = text.find("{", m.start())
+            k = j
+            while k < len(text):
+                if text[k] == "{":
+                    depth += 1
+                elif text[k] == "}":
+                    depth -= 1
+                    if depth == 0:
+                        break
+                k += 1
+            if depth == 0:
+                return text[:i] + LIVE_JS.strip() + text[k+1:]
+    # 3) FIX: page has #mint / #out but NO check() at all — inject LIVE_JS
+    if 'id="mint"' in text or "id='mint'" in text:
+        if "</script>" in text:
+            return text.replace("</script>", "<script>\n" + LIVE_JS.strip() + "\n</script>", 1)
+        if "</body>" in text:
+            return text.replace("</body>", "<script>\n" + LIVE_JS.strip() + "\n</script></body>", 1)
+    # 4) last resort: same text replacements as before
     new_text = text.replace("Demo preview — open /omni for the live verdict.", "LIVE — calling /omni...")
     return new_text.replace("Demo preview", "LIVE")
-
 
 def _ensure_omni(g: dict) -> None:
     """Register /omni if missing. Prefer existing build_omni / build_signal."""
@@ -97,7 +127,6 @@ def _ensure_omni(g: dict) -> None:
     if app is None:
         print("[patch_live_fix] no app — skip /omni")
         return
-
     try:
         for route in app.router.routes:
             if getattr(route, "path", None) == "/omni" and "GET" in (getattr(route, "methods", None) or set()):
@@ -105,16 +134,13 @@ def _ensure_omni(g: dict) -> None:
                 return
     except Exception:
         pass
-
     from fastapi import Query, Request, HTTPException
-
     MINT_RE = g.get("MINT_RE") or re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
     rate_limited = g.get("rate_limited")
     client_ip = g.get("client_ip") or (lambda r: "unknown")
     build_omni = g.get("build_omni")
     build_signal = g.get("build_signal")
     agent_view = g.get("_tvibe_agent_view")
-
     async def _fallback_build(client, mint: str):
         if callable(build_omni):
             return await build_omni(client, mint)
@@ -124,7 +150,6 @@ def _ensure_omni(g: dict) -> None:
                 result = result[0]
             return result if isinstance(result, dict) else {"mint": mint, "error": "empty"}
         return {"mint": mint, "error": "no_builder", "action": "skip", "nfa": True}
-
     def _to_agent(pkt: dict) -> dict:
         if callable(agent_view):
             try:
@@ -143,22 +168,15 @@ def _ensure_omni(g: dict) -> None:
             action = "skip"
         else:
             action = "review"
-        return {
-            "mint": pkt.get("mint"),
-            "action": action,
-            "verdict": verdict,
-            "filter": {"pass": bool(pass_) if pass_ is not None else False},
-            "risk_score": dec.get("risk_score") if dec.get("risk_score") is not None else pkt.get("risk_score"),
-            "liquidity_usd": pkt.get("liquidity_usd"),
-            "unknowns": list(dec.get("unknowns") or pkt.get("unknowns") or [])[:6],
-            "blockers": blockers[:6],
-            "valid_for_s": 30,
-            "nfa": True,
-        }
-
+        return {"mint": pkt.get("mint"), "action": action, "verdict": verdict,
+                "filter": {"pass": bool(pass_) if pass_ is not None else False},
+                "risk_score": dec.get("risk_score") if dec.get("risk_score") is not None else pkt.get("risk_score"),
+                "liquidity_usd": pkt.get("liquidity_usd"),
+                "unknowns": list(dec.get("unknowns") or pkt.get("unknowns") or [])[:6],
+                "blockers": blockers[:6], "valid_for_s": 30, "nfa": True}
     @app.get("/omni", tags=["product"])
     async def omni_live_fix(
-        request: Request,
+        request: Request,  # NOTE: annotated : Request — FastAPI does NOT treat this as a query param
         mint: str = Query(..., min_length=32, max_length=64),
         view: str = Query("full", description="full | agent"),
     ):
@@ -187,49 +205,95 @@ def _ensure_omni(g: dict) -> None:
         if (view or "").strip().lower() in ("agent", "compact", "action"):
             return _to_agent(pkt)
         return pkt
-
     print("[patch_live_fix] /omni registered (fallback)")
 
+def _ensure_play(g: dict) -> None:
+    """FIX 1 — tolerant /play.
+
+    The 422 came from a handler declared like `def play(request)` with NO
+    `: Request` annotation: FastAPI treats bare `request` as a required
+    QUERY param. This replacement accepts ?mint= (what the frontend sends)
+    AND ?request= (what the old buggy callers sent), so neither 422s.
+    It delegates to the SAME builder as /omni, so /play and /omni agree.
+    """
+    app = g.get("app")
+    if app is None:
+        return
+    # Drop any old broken /play route(s) so ours is the only one.
+    try:
+        app.router.routes[:] = [r for r in app.router.routes if getattr(r, "path", None) != "/play"]
+    except Exception:
+        pass
+    from fastapi import Query, Request, HTTPException
+    MINT_RE = g.get("MINT_RE") or re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+    build_omni = g.get("build_omni")
+    build_signal = g.get("build_signal")
+    async def _build(client, mint: str):
+        if callable(build_omni):
+            return await build_omni(client, mint)
+        if callable(build_signal):
+            result = await build_signal(client, mint, security=True)
+            if isinstance(result, tuple) and result:
+                result = result[0]
+            return result if isinstance(result, dict) else {"mint": mint, "error": "empty"}
+        return {"mint": mint, "error": "no_builder", "nfa": True}
+    @app.get("/play", tags=["product"])
+    async def play_fixed(
+        request: Request,  # annotated -> NOT a query param
+        mint: str | None = Query(default=None),
+        # old callers sent the mint under the name `request`
+        request_param: str | None = Query(default=None, alias="request"),
+        view: str = Query("full"),
+    ):
+        _mint = ((mint or request_param) or "").strip()
+        # Also accept ?mint in raw query string even if FastAPI alias quirks occur
+        if not _mint:
+            _mint = (request.query_params.get("mint") or request.query_params.get("request") or "").strip()
+        if not _mint:
+            raise HTTPException(status_code=422, detail="mint is required: /play?mint=<MINT>")
+        if not MINT_RE.match(_mint):
+            raise HTTPException(status_code=400, detail="Invalid Solana token mint address")
+        client = getattr(request.app.state, "client", None)
+        if client is None:
+            import httpx
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                pkt = await _build(client, _mint)
+        else:
+            pkt = await _build(client, _mint)
+        return pkt if isinstance(pkt, dict) else {"mint": _mint, "error": "bad_packet", "nfa": True}
+    print("[patch_live_fix] /play registered (tolerant: ?mint= or ?request=)")
 
 class LiveFixASGI:
-    """Pure ASGI wrapper: patches GET / (live check) and guards GET /health. Everything else passes through."""
-
+    """Pure ASGI wrapper: patches GET / (live check) and guards GET /health."""
     def __init__(self, inner, version="?"):
         self.inner = inner
         self.version = version
-
-    def __getattr__(self, name):  # proxy .state, .routes, .openapi ... to the real app
+    def __getattr__(self, name):
         return getattr(self.inner, name)
-
     async def __call__(self, scope, receive, send):
         if (scope.get("type") != "http" or scope.get("method") != "GET"
                 or scope.get("path") not in ("/", "/health")):
             return await self.inner(scope, receive, send)
-
         path = scope["path"]
         start = None
         chunks = []
         err = None
-
         async def cap(message):
             nonlocal start
             if message["type"] == "http.response.start":
                 start = message
             elif message["type"] == "http.response.body":
                 chunks.append(message.get("body", b""))
-
         try:
             await self.inner(scope, receive, cap)
-        except Exception as e:  # inner app crashed (ServerErrorMiddleware re-raises after replying)
+        except Exception as e:
             err = e
-
         status = start["status"] if start else 500
         headers = list(start["headers"]) if start else []
         body = b"".join(chunks)
         hd = {k.lower(): v for k, v in headers}
         ctype = hd.get(b"content-type", b"").decode("latin-1").lower()
         encoded = b"content-encoding" in hd
-
         if path == "/health":
             if err is not None or start is None or status >= 500:
                 note = (repr(err) if err is not None else "health_handler_status_%s" % status)[:240]
@@ -246,7 +310,7 @@ class LiveFixASGI:
                         body = json.dumps(data).encode()
                 except Exception:
                     pass
-        else:  # "/"
+        else:
             if err is not None and start is None:
                 raise err
             if status == 200 and "text/html" in ctype and not encoded:
@@ -254,28 +318,26 @@ class LiveFixASGI:
                 patched = _patch_html(text)
                 if patched != text:
                     body = patched.encode("utf-8")
-
         keep = [(k, v) for k, v in headers if k.lower() not in (b"content-length",)]
         await send({"type": "http.response.start", "status": status,
                     "headers": keep + [(b"content-length", str(len(body)).encode())]})
         await send({"type": "http.response.body", "body": body})
-
 
 async def _send(send, status, headers, body, ctype):
     await send({"type": "http.response.start", "status": status,
                 "headers": list(headers) + [(b"content-type", ctype), (b"content-length", str(len(body)).encode())]})
     await send({"type": "http.response.body", "body": body})
 
-
 def apply(g: dict) -> None:
     if not isinstance(g, dict):
         raise TypeError("apply expects shared globals dict")
     _ensure_omni(g)
+    _ensure_play(g)
     html = g.get("HOME_HTML")
     if isinstance(html, str) and html:
         g["HOME_HTML"] = _patch_html(html)
     app = g.get("app")
     if app is not None and not isinstance(app, LiveFixASGI):
         version = g.get("VERSION") or getattr(app, "version", None) or "live-fix"
-        g["app"] = LiveFixASGI(app, version)  # main.py exports this wrapped app
+        g["app"] = LiveFixASGI(app, version)
     print("[patch_live_fix] applied (ASGI wrapper on / and /health)")
