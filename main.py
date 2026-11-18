@@ -1,7 +1,6 @@
 """main.py — TVibe FILTER loader (THIS file is what Render runs). Order matters.
-FIX 16/11: load core_final (TVibe FILTER 2070 + /omni), NOT old core.py.
-Render Start Command MUST be: uvicorn main:app --host 0.0.0.0 --port $PORT
-If Render still runs `uvicorn core:app`, this file is ignored and web stays old.
+Render Start Command: uvicorn main:app --host 0.0.0.0 --port $PORT
+(core.py is now a thin shim, so `uvicorn core:app` also lands here.)
 """
 from __future__ import annotations
 
@@ -31,60 +30,31 @@ def _exec_module_file(path: str, g: dict, label: str) -> None:
         raise
 
 
-# 1) Core — FastAPI app + base /signal /stats
-import core_final as core  # noqa: F401  # FIX: old core.py has no FILTER/2070/no /omni
+def _apply_patch(modname: str, g: dict) -> None:
+    try:
+        mod = __import__(modname)
+        mod.apply(g)
+        print(f"[loader] {modname} applied")
+    except Exception as e:
+        print(f"[loader] {modname} NOT applied: {e}")
 
-g = dict(vars(core))  # core_final already has FILTER landing + /omni
+
+# 1) Core — FastAPI app + base /signal /stats
+import core_final as core  # noqa: E402,F401
+
+g = dict(vars(core))
 g["__name__"] = "__main__"
 g["__file__"] = os.path.join(ROOT, "main.py")
 
 # 2) features.py — heuristics layers (shared namespace)
 _exec_module_file(os.path.join(ROOT, "features.py"), g, "features")
 
-# 3) extensions.py — MCP, /omni, ops, SI, parts 94…157 (must be after core/features)
+# 3) extensions.py — MCP, /omni, ops, SI (must be after core/features)
 _exec_module_file(os.path.join(ROOT, "extensions.py"), g, "extensions")
 
-# 4) Optional stats display fix
-try:
-    import patch_stats_fix
-
-    patch_stats_fix.apply(g)
-    print("[loader] patch_stats_fix applied")
-except Exception as e:
-    print(f"[loader] patch_stats_fix NOT applied: {e}")
-
-# 5) Optional P0 runtime pin (version / stale / client_ip) — after extensions
-try:
-    import patch_p0
-
-    patch_p0.apply(g)
-    print("[loader] patch_p0 applied")
-except Exception as e:
-    print(f"[loader] patch_p0 NOT applied: {e}")
-
-# 5b) Filter v4 (private thresholds stay in patch_filter_v4, never exposed on web)
-try:
-    import patch_filter_v4
-    patch_filter_v4.apply(g)
-    print("[loader] patch_filter_v4 applied")
-except Exception as e:
-    print(f"[loader] patch_filter_v4 NOT applied: {e}")
-
-# 5c) USDC-pair fix: CBUCKS/USDC (PumpSwap) mint as quoteToken + search fallback
-try:
-    import patch_usdc_pair_v2
-    patch_usdc_pair_v2.apply(g)
-    print("[loader] patch_usdc_pair_v2 applied")
-except Exception as e:
-    print(f"[loader] patch_usdc_pair_v2 NOT applied: {e}")
-
-# 6) FINAL: override homepage DEMO -> LIVE (must be LAST, after extensions overwrites HOME_HTML)
-try:
-    import patch_home_live_v2 as patch_home_live
-    patch_home_live.apply(g)
-    print("[loader] patch_home_live_v2 applied")
-except Exception as e:
-    print(f"[loader] patch_home_live_v2 NOT applied: {e}")
+# 4) Optional patches, in order
+for _name in ("patch_stats_fix", "patch_p0", "patch_filter_v4", "patch_usdc_pair_v2"):
+    _apply_patch(_name, g)
 
 app = g.get("app")
 if app is None:
@@ -95,12 +65,5 @@ globals().update(g)
 
 print("[loader] ready app=%s version=%s" % (type(app).__name__, g.get("VERSION") or getattr(app, "version", "?")))
 
-# === Dán block này vào CUỐI main.py (sau mọi patch khác) ===
-
-# FINAL safety: /omni + live homepage + health never-500
-try:
-    import patch_live_fix
-    patch_live_fix.apply(g)
-    print("[loader] patch_live_fix applied")
-except Exception as e:
-    print(f"[loader] patch_live_fix NOT applied: {e}") 
+# 5) FINAL (must be last): live homepage check() + /omni fallback + /health never-500
+_apply_patch("patch_live_fix", g)
