@@ -25,10 +25,15 @@ def _ensure_omni_play(g: dict) -> None:
     app = g.get("app")
     if app is None:
         return
+    # MINI v6: FORCE-replace. The old /omni handler in extensions.py crashes
+    # with 500 when a token has no SOL pair, and v5 skipped registering
+    # because the path already existed — so the crashing handler kept running.
     try:
-        paths = {getattr(r, "path", None) for r in app.router.routes}
+        app.router.routes[:] = [r for r in app.router.routes
+                                if getattr(r, "path", None) not in ("/omni", "/play")]
     except Exception:
-        paths = set()
+        pass
+    paths = set()
     from fastapi import Query, Request
     import re as _re
     mint_re = g.get("MINT_RE") or _re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
@@ -52,13 +57,18 @@ def _ensure_omni_play(g: dict) -> None:
             return {"error": "mint is required", "mint": None}
         if not mint_re.match(m):
             return {"error": "Invalid Solana token mint address", "mint": m}
-        client = getattr(request.app.state, "client", None)
-        if client is None:
-            import httpx
-            async with httpx.AsyncClient(timeout=25.0) as client:
+        try:
+            client = getattr(request.app.state, "client", None)
+            if client is None:
+                import httpx
+                async with httpx.AsyncClient(timeout=25.0) as client:
+                    pkt = await _build(client, m)
+            else:
                 pkt = await _build(client, m)
-        else:
-            pkt = await _build(client, m)
+        except Exception as e:
+            # No-pair / upstream hiccup must be a normal JSON answer, never a 500.
+            return {"mint": m, "error": f"upstream_or_no_pair: {e}"[:240],
+                    "action": "review", "verdict": "review", "nfa": True}
         return pkt if isinstance(pkt, dict) else {"mint": m, "error": "bad_packet", "nfa": True}
 
     if "/omni" not in paths:
@@ -90,7 +100,7 @@ class LiveFixASGI:
     async def __call__(self, scope, receive, send):
         # 1) Probe — must be FIRST, before anything else.
         if scope.get("type") == "http" and scope.get("path") == "/__main_status":
-            body = json.dumps({"main_py": "v4", "patch_live_fix": "v5-mini",
+            body = json.dumps({"main_py": "v4", "patch_live_fix": "v6-mini",
                                "fix": "asgi __main_status in LiveFixASGI"}).encode()
             await _send(send, 200, [(b"cache-control", b"no-store")], body, b"application/json")
             return
@@ -157,4 +167,4 @@ def apply(g: dict) -> None:
     if app is not None and not isinstance(app, LiveFixASGI):
         version = g.get("VERSION") or getattr(app, "version", None) or "live-fix"
         g["app"] = LiveFixASGI(app, version)
-    print("[patch_live_fix] applied v5-mini (ASGI wrapper on /, /health, /__main_status)")
+    print("[patch_live_fix] applied v6-mini (ASGI wrapper on /, /health, /__main_status)")
