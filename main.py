@@ -174,3 +174,40 @@ core.__dict__.setdefault("mcp_error", None)
 core.__dict__.setdefault("mcp_server", None)
 g.setdefault("mcp_error", core.__dict__["mcp_error"])
 g.setdefault("mcp_server", core.__dict__["mcp_server"])
+
+# ------------------------------------------------------------------
+# FIX v4: /__main_status — ASGI-level probe, bypasses FastAPI routing.
+# Why ASGI: patch_live_fix wraps `app` in a Starlette wrapper, so adding
+# a FastAPI route to the inner app does not reliably surface. Intercepting
+# here guarantees the probe answers no matter how the app is wrapped.
+# ------------------------------------------------------------------
+try:
+    import json as _json
+
+    _orig_app = app
+
+    class _MainFixASGI:
+        def __init__(self, _app):
+            self._app = _app
+
+        async def __call__(self, scope, receive, send):
+            if scope.get("type") == "http" and scope.get("path") == "/__main_status":
+                _body = _json.dumps(
+                    {"main_py": "v4", "fix": "asgi __main_status", "play_fix": "tolerant /play"}
+                ).encode("utf-8")
+                await send(
+                    {
+                        "type": "http.response.start",
+                        "status": 200,
+                        "headers": [(b"content-type", b"application/json")],
+                    }
+                )
+                await send({"type": "http.response.body", "body": _body})
+                return
+            await self._app(scope, receive, send)
+
+    app = _MainFixASGI(_orig_app)
+    globals()["app"] = app
+    print("[loader] FIX v4 applied: ASGI /__main_status")
+except Exception as _e:
+    print(f"[loader] FIX v4 failed (non-fatal): {_e}")
