@@ -88,7 +88,7 @@ _exec_module_file(os.path.join(ROOT, "extensions.py"), g, "extensions")
 _sync_to_core(core, g)
 
 # 4) Optional patches, in order
-for _name in ("patch_stats_fix", "patch_p0", "patch_filter_v4", "patch_usdc_pair_v2"):
+for _name in ("patch_builder", "patch_stats_fix", "patch_p0", "patch_filter_v4", "patch_usdc_pair_v2"):
     _apply_patch(_name, g)
     _sync_to_core(core, g)
 
