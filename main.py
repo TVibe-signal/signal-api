@@ -52,6 +52,16 @@ _exec_module_file(os.path.join(ROOT, "features.py"), g, "features")
 # 3) extensions.py — MCP, /omni, ops, SI (must be after core/features)
 _exec_module_file(os.path.join(ROOT, "extensions.py"), g, "extensions")
 
+# 3b) core_final's own routes (/health, /stats ...) read core_final's module globals, but
+#     extensions.py runs in the shared dict `g`. Copy the names it created (mcp_error, ...)
+#     back, otherwise /health raises NameError: name 'mcp_error' is not defined.
+for _k, _v in list(g.items()):
+    if _k not in core.__dict__:
+        core.__dict__[_k] = _v
+for _k in ("mcp_server", "mcp_error"):
+    if _k in g:
+        core.__dict__[_k] = g[_k]
+
 # 4) Optional patches, in order
 for _name in ("patch_stats_fix", "patch_p0", "patch_filter_v4", "patch_usdc_pair_v2"):
     _apply_patch(_name, g)
