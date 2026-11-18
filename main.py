@@ -52,6 +52,12 @@ def _sync_to_core(core, g: dict) -> None:
     for _k, _v in list(g.items()):
         if _k not in core.__dict__:
             core.__dict__[_k] = _v
+    # Patched values MUST overwrite, not just fill missing keys:
+    # patch_live_fix patches HOME_HTML and wraps app — if we only copy
+    # missing keys, core_final keeps serving the OLD unpatched homepage.
+    for _k in ("HOME_HTML", "app"):
+        if _k in g:
+            core.__dict__[_k] = g[_k]
     # FIX 2: force defaults — even if extensions.py failed / never assigned them.
     # Never leave mcp_error undefined.
     core.__dict__.setdefault("mcp_error", None)
