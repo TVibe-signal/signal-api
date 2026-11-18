@@ -1,17 +1,35 @@
-"""patch_live_fix.py — MINI v8 (paste-safe, ~150 lines).
+"""patch_live_fix.py — MINI v11 COMPLETE (paste-safe).
 Replace ENTIRE content of patch_live_fix.py on GitHub with this file.
-Fixes vs v4-mini:
-- v4 only rewrote ?request= (killed the 422) but NEVER touched /omni.
-  The old /omni handler still called build_omni/build_signal with NO
-  try/except -> token with no SOL pair raised -> FastAPI 500.
-- v6 registers NEW /omni + /play (old routes removed first) and wraps
-  EVERY builder call in try/except -> no-pair / upstream error becomes
-  a normal JSON answer {"error": "upstream_or_no_pair: ..."}, never 500.
+v11 COMPLETE = v10 + whole-page restyle (not just CHECK result):
+Trader-first system (see reply for the app comparison):
+COMPLETE = every verdict on the page is restyled, not just #out:
+- CHECK result badge: FULL-WIDTH banner, color + ICON + word (reads in
+  1s, in sunlight, even if red/green color-blind).
+- Quick buttons "SOL • PASS" / "PEACEFROG • REVIEW" / "COA • REVIEW":
+  solid verdict-color buttons (were dim gold text on dark brown).
+- Static PASS chip in the SOL card: green chip + check icon.
+- Labels "LIVE CORE" / "SOL / USD": brightened, spaced out.
+- CAUTION split from REVIEW: CAUTION orange + warning sign, REVIEW amber
+  + eye. AVOID red + no-entry sign, PASS green + check, SKIP gray.
+- Blockers become chips (dark card, rounded) instead of faint gray lines.
+- Numbers in monospace tabular font (Risk, Liquidity, Price line up);
+  labels in system font. No webfont download: fast on phone.
 """
 from __future__ import annotations
 import json, re, time
 
 MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+
+READABLE = """<style id="tvibe-readable">
+body{background:#0F1115!important}
+#out{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#F5F5F5!important;font-size:16px;line-height:1.65}
+#out li{color:#E6E6E6!important;background:#1C1F26!important;padding:8px 12px!important;margin:6px 0!important;border-radius:8px!important;list-style:none!important}
+#out ul{padding-left:0!important}
+#out b{font-family:ui-monospace,"SF Mono","Roboto Mono",monospace!important;font-size:18px!important}
+#out a{color:#5ED1FF!important;font-weight:700}
+p{color:#D9D9D9!important}
+#mint{color:#fff!important;font-family:ui-monospace,"SF Mono","Roboto Mono",monospace!important}
+</style><script>(function(){var C={AVOID:["#FF3B30","#fff","\u26d4"],SKIP:["#6B7280","#fff","\u2298"],CAUTION:["#FF7A00","#000","\u26a0"],REVIEW:["#FFC107","#000","\u0001f441"],PASS:["#00D26A","#000","\u2713"]};function chip(el,t,block){el.dataset.tvibe="1";el.textContent=C[t][2]+" "+t;el.style.background=C[t][0];el.style.color=C[t][1];el.style.fontWeight="800";el.style.borderRadius="10px";el.style.letterSpacing="1px";if(block){el.style.display="block";el.style.fontSize="20px";el.style.padding="14px";el.style.textAlign="center";el.style.margin="10px 0";}else{el.style.display="inline-block";el.style.fontSize="16px";el.style.padding="6px 12px";}}function paint(){var o=document.getElementById("out");if(o){var els=o.querySelectorAll("span,b,div");for(var i=0;i<els.length;i++){var el=els[i];if(el.dataset.tvibe)continue;var t=(el.textContent||"").trim().toUpperCase();if(C[t]&&el.children.length===0)chip(el,t,true);}}var all=document.querySelectorAll("span,b,div,button,a");for(var j=0;j<all.length;j++){var a2=all[j];if(a2.dataset.tvibe)continue;if(o&&o.contains(a2))continue;var tx=(a2.textContent||"").trim();var m=tx.match(/^(.+?)\s*[\u2022\u00b7]\s*(PASS|REVIEW|CAUTION|AVOID|SKIP)$/i);if(m&&a2.children.length===0){var v=m[2].toUpperCase();a2.dataset.tvibe="1";a2.textContent=m[1].trim()+" \u2022 "+C[v][2]+" "+v;a2.style.background=C[v][0];a2.style.color=C[v][1];a2.style.fontWeight="800";a2.style.padding="10px 14px";a2.style.borderRadius="8px";a2.style.display="inline-block";a2.style.margin="4px";continue;}var t2=tx.toUpperCase();if(C[t2]&&a2.children.length===0)chip(a2,t2,false);if(tx==="LIVE CORE"||tx==="SOL / USD"){a2.dataset.tvibe="1";a2.style.color="#B8B8B8";a2.style.letterSpacing="3px";a2.style.fontSize="12px";}}}paint();if(window.MutationObserver){new MutationObserver(paint).observe(document.body,{childList:true,subtree:true,characterData:true});}})();</script>"""
 
 async def _send(send, status, headers, body, ctype):
     await send({"type": "http.response.start", "status": status,
@@ -49,15 +67,11 @@ def _register(g):
     from fastapi import Query, Request
 
     @app.get("/omni", tags=["product"])
-    async def omni_v6(request: Request, mint: str | None = Query(default=None)):
+    async def omni_v9(request: Request, mint: str | None = Query(default=None)):
         m = (mint or request.query_params.get("mint")
              or request.query_params.get("request") or "").strip()
         if not MINT_RE.match(m):
             return {"error": "Invalid Solana token mint address", "mint": m}
-        # v7: NEVER touch request.app.state. main.py wraps the app in
-        # _MainFixASGI, which has NO .state -> AttributeError here raised
-        # BEFORE _build's try/except -> plain "Internal Server Error" 500.
-        # Always use a fresh client; it cannot raise this way.
         try:
             import httpx
             async with httpx.AsyncClient(timeout=25.0) as client:
@@ -67,17 +81,13 @@ def _register(g):
                     "action": "review", "verdict": "review", "nfa": True}
 
     @app.get("/play", tags=["product"])
-    async def play_v6(request: Request, mint: str | None = Query(default=None)):
+    async def play_v9(request: Request, mint: str | None = Query(default=None)):
         m = (mint or request.query_params.get("mint")
              or request.query_params.get("request") or "").strip()
         if not m:
             return {"error": "mint is required: /play?mint=<MINT>", "mint": None}
         if not MINT_RE.match(m):
             return {"error": "Invalid Solana token mint address", "mint": m}
-        # v7: NEVER touch request.app.state. main.py wraps the app in
-        # _MainFixASGI, which has NO .state -> AttributeError here raised
-        # BEFORE _build's try/except -> plain "Internal Server Error" 500.
-        # Always use a fresh client; it cannot raise this way.
         try:
             import httpx
             async with httpx.AsyncClient(timeout=25.0) as client:
@@ -85,7 +95,7 @@ def _register(g):
         except Exception as e:
             return {"mint": m, "error": f"upstream_or_no_pair: {e}"[:240],
                     "action": "review", "verdict": "review", "nfa": True}
-    print("[patch_live_fix] /omni + /play registered (v6, builder wrapped)")
+    print("[patch_live_fix] /omni + /play registered (v11, builder wrapped)")
 
 class LiveFixASGI:
     def __init__(self, inner, version, g=None):
@@ -96,8 +106,8 @@ class LiveFixASGI:
         return getattr(self.inner, name)
     async def __call__(self, scope, receive, send):
         if scope.get("type") == "http" and scope.get("path") == "/__main_status":
-            body = json.dumps({"main_py": "v4", "patch_live_fix": "v8-mini",
-                               "fix": "omni/play builder wrapped, never 500"}).encode()
+            body = json.dumps({"main_py": "v4", "patch_live_fix": "v11-mini",
+                               "fix": "asgi omni/play + readable badges"}).encode()
             await _send(send, 200, [(b"cache-control", b"no-store")], body, b"application/json")
             return
         # v8: answer /omni + /play HERE at ASGI level. Route registration
@@ -167,6 +177,17 @@ class LiveFixASGI:
             await _send(send, 200, [(b"cache-control", b"no-store")],
                         json.dumps(out).encode(), b"application/json")
             return
+        if path == "/" and status == 200:
+            try:
+                _hd = {k.lower(): v for k, v in headers}
+                _ct = _hd.get(b"content-type", b"").decode("latin-1").lower()
+                if "text/html" in _ct and b"content-encoding" not in _hd:
+                    _t = body.decode("utf-8", "ignore")
+                    if "tvibe-readable" not in _t:
+                        _t = _t.replace("</body>", READABLE + "</body>", 1) if "</body>" in _t else _t + READABLE
+                        body = _t.encode("utf-8")
+            except Exception as e:
+                print(f"[patch_live_fix] readable inject failed (non-fatal): {e}")
         keep = [(k, v) for k, v in headers if k.lower() != b"content-length"]
         await send({"type": "http.response.start", "status": status,
                     "headers": keep + [(b"content-length", str(len(body)).encode())]})
@@ -183,4 +204,4 @@ def apply(g: dict) -> None:
     if app is not None and not isinstance(app, LiveFixASGI):
         version = g.get("VERSION") or getattr(app, "version", None) or "live-fix"
         g["app"] = LiveFixASGI(app, version, g)
-    print("[patch_live_fix] applied v8-mini (ASGI wrapper + /omni /play never-500)")
+    print("[patch_live_fix] applied v11-mini (ASGI omni/play + readable badges)")
