@@ -67,3 +67,5 @@ print("[loader] ready app=%s version=%s" % (type(app).__name__, g.get("VERSION")
 
 # 5) FINAL (must be last): live homepage check() + /omni fallback + /health never-500
 _apply_patch("patch_live_fix", g)
+app = g.get("app")  # wrapped app (patch_live_fix) — this is what uvicorn serves
+globals()["app"] = app
