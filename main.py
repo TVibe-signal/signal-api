@@ -68,6 +68,65 @@ def _sync_to_core(core, g: dict) -> None:
             core.__dict__[_k] = g[_k]
 
 
+
+# ---------------------------------------------------------------------------
+# V4 — SELF-CONTAINED 422 FIX (lives in main.py alone).
+# Why v1-v3 kept failing: they depended on BOTH main.py + patch_live_fix.py
+# being pushed correctly. If either file was stale/cached/not pushed, 422 stayed.
+# This wrapper is applied unconditionally here, so pushing main.py ALONE
+# is enough to kill the 422. patch_live_fix.py is now optional.
+# How: the broken handler is `def xxx(request)` with NO `: Request` annotation,
+# so FastAPI demands ?request=... . Frontend only sends ?mint=... .
+# We inject request=<mint> at ASGI level before FastAPI ever sees it.
+# ---------------------------------------------------------------------------
+import json as _json_v4
+
+
+class _MainFixASGI:
+    def __init__(self, inner):
+        self.inner = inner
+
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") == "http" and scope.get("method") == "GET":
+            _path = scope.get("path")
+            if _path == "/__main_status":
+                body = _json_v4.dumps(
+                    {"main_py": "v4", "asgi_query_rewrite": True,
+                     "fix": "inject ?request=<mint> for /omni /play /signal"}
+                ).encode()
+                await send({"type": "http.response.start", "status": 200,
+                            "headers": [(b"content-type", b"application/json"),
+                                        (b"content-length", str(len(body)).encode())]})
+                await send({"type": "http.response.body", "body": body})
+                return
+            if _path in ("/omni", "/play", "/signal", "/signals"):
+                try:
+                    from urllib.parse import parse_qsl, urlencode
+                    _qs = scope.get("query_string", b"").decode("latin-1")
+                    _params = parse_qsl(_qs, keep_blank_values=True)
+                    _keys = {k for k, _ in _params}
+                    _d = dict(_params)
+                    _mint = _d.get("mint") or _d.get("request") or ""
+                    if _mint and "request" not in _keys:
+                        _params.append(("request", _mint))
+                    if _mint and "mint" not in _keys:
+                        _params.append(("mint", _mint))
+                    scope = dict(scope)
+                    scope["query_string"] = urlencode(_params).encode("latin-1")
+                except Exception as _e:
+                    print(f"[main] query rewrite failed (non-fatal): {_e}")
+        return await self.inner(scope, receive, send)
+
+
+def _wrap_main_fix(app):
+    if app is None or type(app).__name__ == "_MainFixASGI":
+        return app
+    return _MainFixASGI(app)
+
+
 # 1) Core — FastAPI app + base /signal /stats
 import core_final as core  # noqa: E402,F401
 
@@ -111,6 +170,9 @@ print("[loader] ready app=%s version=%s" % (type(app).__name__, g.get("VERSION")
 _apply_patch("patch_live_fix", g)
 _sync_to_core(core, g)
 app = g.get("app")  # wrapped app (patch_live_fix) — this is what uvicorn serves
+# V4: wrap HERE too — even if patch_live_fix crashed / is stale, main.py alone fixes 422.
+app = _wrap_main_fix(app)
+g["app"] = app
 globals()["app"] = app
 
 # ------------------------------------------------------------------
@@ -174,6 +236,12 @@ try:
         print("[loader] FIX 1 skipped: no add_api_route on final app — fix patch_live_fix.py directly (see below)")
 except Exception as _e:
     print(f"[loader] FIX 1 failed (non-fatal): {_e}")
+
+# V4: final wrap — the app uvicorn actually serves MUST be the wrapper.
+app = _wrap_main_fix(g.get("app") or app)
+g["app"] = app
+globals()["app"] = app
+print("[main] v4 ASGI wrapper installed — /omni /play /signal query rewrite ON")
 
 # Final guarantee for /health, after ALL patches.
 core.__dict__.setdefault("mcp_error", None)
