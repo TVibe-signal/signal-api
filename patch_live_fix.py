@@ -1,140 +1,101 @@
-"""patch_live_fix.py — MINI v16 COMPLETE (paste-safe).
-Replace ENTIRE content of patch_live_fix.py on GitHub with this file.
-v16 COMPLETE = v15 + friendly No-pair error card + hero-hide fix (hero shares a card with the form):
-Trader-first system (see reply for the app comparison):
-COMPLETE = every verdict on the page is restyled, not just #out:
-- CHECK result badge: FULL-WIDTH banner, color + ICON + word (reads in
-  1s, in sunlight, even if red/green color-blind).
-- Quick buttons "SOL • PASS" / "PEACEFROG • REVIEW" / "COA • REVIEW":
-  solid verdict-color buttons (were dim gold text on dark brown).
-- Static PASS chip in the SOL card: green chip + check icon.
-- Labels "LIVE CORE" / "SOL / USD": brightened, spaced out.
-- CAUTION split from REVIEW: CAUTION orange + warning sign, REVIEW amber
-  + eye. AVOID red + no-entry sign, PASS green + check, SKIP gray.
-- Blockers become chips (dark card, rounded) instead of faint gray lines.
-- Numbers in monospace tabular font (Risk, Liquidity, Price line up);
-  labels in system font. No webfont download: fast on phone.
-- Hero block "SOL PASS / SOL Risk 0/100" hidden: SOL is not the token
-  you are about to sell, so it no longer occupies the best slot.
-- Mint input labelled TOKEN CẦN BÁN; after CHECK it shows the mint
-  being sold (first 4 … last 4), so the slot belongs to your token.
+"""patch_live_fix.py — v17 (paste-safe, complete replacement).
+
+Why v17: /omni returned HTTP 404 for EVERY mint, including wSOL
+(Render logs 09:58 PM Nov 18). The builder in extensions.py raises 404
+when its DexScreener lookup finds no pair — and that lookup now fails
+for all mints. v17 keeps the builder but adds a direct DexScreener
+fallback: builder raises or returns error -> ask DexScreener directly
+-> conservative verdict with HTTP 200. Fallback verdicts NEVER say
+PASS (authorities are not verified on that path).
+
+Also: ASGI wrapper (probe, query rewrite, /health never-500),
+/agent + /agent.json self-description, tolerant /play.
 """
 from __future__ import annotations
 import json, re, time
 
 MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
-
-READABLE = """<style id="tvibe-readable">
-body{background:#0F1115!important}
-#out{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;color:#F5F5F5!important;font-size:16px;line-height:1.65}
-#out li{color:#E6E6E6!important;background:#1C1F26!important;padding:8px 12px!important;margin:6px 0!important;border-radius:8px!important;list-style:none!important}
-#out ul{padding-left:0!important}
-#out b{font-family:ui-monospace,"SF Mono","Roboto Mono",monospace!important;font-size:18px!important}
-#out a{color:#5ED1FF!important;font-weight:700}
-p{color:#D9D9D9!important}
-#mint{color:#fff!important;font-family:ui-monospace,"SF Mono","Roboto Mono",monospace!important}
-</style><script>(function(){var C={AVOID:["#FF3B30","#fff","\u26d4"],SKIP:["#6B7280","#fff","\u2298"],CAUTION:["#FF7A00","#000","\u26a0"],REVIEW:["#FFC107","#000","👁"],PASS:["#00D26A","#000","\u2713"]};function chip(el,t,block){el.dataset.tvibe="1";el.textContent=C[t][2]+" "+t;el.style.background=C[t][0];el.style.color=C[t][1];el.style.fontWeight="800";el.style.borderRadius="10px";el.style.letterSpacing="1px";if(block){el.style.display="block";el.style.fontSize="20px";el.style.padding="14px";el.style.textAlign="center";el.style.margin="10px 0";}else{el.style.display="inline-block";el.style.fontSize="16px";el.style.padding="6px 12px";}}function esc(s){return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");}
-var PLAIN={very_low_liquidity:"Liquidity is very low",low_liquidity:"Liquidity is low",no_recent_trades:"No trades recently",dead_pool:"Pool looks dead",extreme_holder_concentration:"Top holders own most of the supply",dominant_holder:"One holder dominates",lp_unverified:"LP not verified",heavy_buying:"Heavy buying",high_turnover:"High turnover",new_pair:"Pair recently created",high_activity:"High activity",mint_revoked:"Mint authority revoked (good)",freeze_revoked:"Freeze authority revoked (good)"};
-function endpointBlock(){if(document.getElementById("tvibe-endpoint-block"))return;var o=document.getElementById("out");if(!o||!o.parentNode)return;var d=document.createElement("div");d.id="tvibe-endpoint-block";d.style.cssText="background:#14171F;border-radius:10px;padding:14px;margin:12px 0;";d.innerHTML='<div style="font-size:12px;color:#8A8F98;letter-spacing:1px;text-transform:uppercase;">Endpoint for Agents</div><pre style="background:#0B0D12;border-radius:8px;padding:10px;overflow:auto;color:#5ED1FF;font-size:13px;margin:8px 0;">GET /omni?mint=TOKEN_MINT_ADDRESS</pre><div style="color:#D9D9D9;font-size:13px;">No API key \u2022 No signup \u2022 Instant JSON \u2022 Full spec: /agent.json</div>';o.parentNode.insertBefore(d,o.nextSibling);}
-function errorCard(){var o=document.getElementById("out");if(!o)return;var links=[];var as=o.querySelectorAll("a");for(var j=0;j<as.length;j++){links.push(as[j].outerHTML);}o.dataset.tvibeError="1";o.innerHTML='<div style="background:#1C1F26;border-radius:10px;padding:14px;margin:10px 0;"><div style="font-size:18px;font-weight:800;color:#FFC107;">No pair found</div><div style="color:#D9D9D9;font-size:14px;line-height:1.6;margin-top:6px;">DexScreener has no Solana pair for this mint. This is about the TOKEN, not the API.</div><div style="color:#D9D9D9;font-size:14px;line-height:1.6;margin-top:8px;">Why this happens:<br/>\u2022 Brand-new token, no pair yet<br/>\u2022 Pair quoted in USDC<br/>\u2022 Wrong mint - copy it again from DexScreener / Solscan<br/>\u2022 DexScreener slow - press CHECK once more</div><div style="color:#D9D9D9;font-size:14px;line-height:1.6;margin-top:8px;">Is the API still alive? Press <b>COA \u2022 REVIEW</b> below. If COA returns AVOID, the API is fine - only this mint has no pair.</div><div style="margin-top:10px;">'+links.join(" ")+'</div></div>';}
-function cardsResult(){var o=document.getElementById("out");if(!o)return;var tx=o.textContent||"";var vm=tx.match(/(PASS|REVIEW|CAUTION|AVOID|SKIP)/);var rm=tx.match(/Risk\s*(\d+)/);var lm=tx.match(/Liquidity\s*\$([\d,\.]+)/);var pm=tx.match(/Price\s*\$([\d\.]+)/);if(!vm||!rm||!lm||!pm)return;var v=vm[1],risk=parseInt(rm[1],10),liq=lm[1],pr=pm[1];var rl=risk>=60?"high":risk>=30?"medium":"low";var sigs=[];var lis=o.querySelectorAll("li");for(var i=0;i<lis.length;i++){var c=(lis[i].textContent||"").trim();if(c)sigs.push(c);}var links=[];var as=o.querySelectorAll("a");for(var j=0;j<as.length;j++){links.push(as[j].outerHTML);}var chips=sigs.map(function(c){var col=(v==="AVOID"||v==="SKIP")?"#FF3B30":(v==="CAUTION")?"#FF7A00":(v==="REVIEW")?"#FFC107":"#00D26A";return '<span style="display:inline-block;background:'+col+'22;color:'+col+';border:1px solid '+col+';border-radius:999px;padding:4px 10px;margin:3px;font-size:13px;font-weight:700;">'+esc(c)+'</span>';}).join("");var plain=sigs.map(function(c){return PLAIN[c]||c;}).join(" \u2022 ");var vcol=C[v][0],vfg=C[v][1];var card=function(l,val,extra){return '<div data-tvibe-card style="background:#1C1F26;border-radius:10px;padding:12px;"><div style="font-size:12px;color:#8A8F98;letter-spacing:1px;text-transform:uppercase;">'+l+'</div><div style="font-size:18px;font-weight:800;margin-top:4px;'+(extra||"")+'">'+val+'</div></div>';};o.dataset.tvibeCards="1";o.innerHTML='<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0;">'+card("Verdict",esc(C[v][2]+" "+v),"background:"+vcol+";color:"+vfg+";border-radius:8px;padding:6px 10px;display:inline-block;font-size:16px;")+card("Risk Score",risk+" ("+rl+")")+card("Liquidity","$"+esc(liq))+card("Price","$"+esc(pr))+'</div>'+(sigs.length?'<div style="font-size:12px;color:#8A8F98;letter-spacing:1px;text-transform:uppercase;margin-top:6px;">Flags</div><div style="margin:6px 0;">'+chips+'</div><div style="color:#D9D9D9;font-size:14px;line-height:1.5;">'+esc(plain)+'</div>':"")+'<div style="margin-top:10px;">'+links.join(" ")+'</div>';endpointBlock();}
-function cleanHero(){var o=document.getElementById("out");var all=document.querySelectorAll("span,b,div");for(var i=0;i<all.length;i++){var el=all[i];if(el.dataset.tvibeHero)continue;if(o&&o.contains(el))continue;if((el.textContent||"").trim()!=="PASS")continue;el.dataset.tvibeHero="1";var card=null,cur=el;for(var k=0;k<6&&cur.parentElement;k++){cur=cur.parentElement;if(cur.querySelector("input"))break;if(o&&cur.contains(o))break;if((cur.textContent||"").indexOf("Risk")>=0){card=cur;}}if(card){card.dataset.tvibeHero="1";card.style.display="none";}else if(el.children.length===0){el.style.display="none";}}}function tokenLabel(){var inp=document.getElementById("mint");if(!inp)return;var lab=document.getElementById("tvibe-token-label");if(!lab){lab=document.createElement("div");lab.id="tvibe-token-label";lab.style.cssText="font-size:13px;letter-spacing:2px;color:#8A8F98;font-weight:700;margin:0 0 6px;";inp.parentNode.insertBefore(lab,inp);}var o=document.getElementById("out");var m=(inp.value||"").trim();if(o&&(o.textContent||"").indexOf("LIVE")>=0&&m){lab.textContent="TOKEN CẦN BÁN • "+m.slice(0,4)+"…"+m.slice(-4);}else{lab.textContent="TOKEN CẦN BÁN — DÁN MINT, BẤM CHECK";}}function paint(){cleanHero();var o=document.getElementById("out");if(o&&(o.textContent||"").indexOf("LIVE")>=0&&!o.dataset.tvibeCards){cardsResult();}if(o&&((o.textContent||"").indexOf("Not found")>=0||(o.textContent||"").indexOf("no Solana pair")>=0)&&!o.dataset.tvibeError){errorCard();}if(o&&!o.dataset.tvibeCards&&!o.dataset.tvibeError){var els=o.querySelectorAll("span,b,div");for(var i=0;i<els.length;i++){var el=els[i];if(el.dataset.tvibe)continue;var t=(el.textContent||"").trim().toUpperCase();if(C[t]&&el.children.length===0)chip(el,t,true);}}var all=document.querySelectorAll("span,b,div,button,a");for(var j=0;j<all.length;j++){var a2=all[j];if(a2.dataset.tvibe)continue;if(o&&o.contains(a2))continue;var tx=(a2.textContent||"").trim();var m=tx.match(/^(.+?)\s*[\u2022\u00b7]\s*(PASS|REVIEW|CAUTION|AVOID|SKIP)$/i);if(m&&a2.children.length===0){var v=m[2].toUpperCase();a2.dataset.tvibe="1";a2.textContent=m[1].trim()+" \u2022 "+C[v][2]+" "+v;a2.style.background=C[v][0];a2.style.color=C[v][1];a2.style.fontWeight="800";a2.style.padding="10px 14px";a2.style.borderRadius="8px";a2.style.display="inline-block";a2.style.margin="4px";continue;}var t2=tx.toUpperCase();if(C[t2]&&a2.children.length===0)chip(a2,t2,false);if(tx==="LIVE CORE"||tx==="SOL / USD"){a2.dataset.tvibe="1";a2.style.color="#B8B8B8";a2.style.letterSpacing="3px";a2.style.fontSize="12px";}}tokenLabel();}paint();if(window.MutationObserver){new MutationObserver(paint).observe(document.body,{childList:true,subtree:true,characterData:true});}})();</script>"""
+DEX_URL = "https://api.dexscreener.com/latest/dex/tokens/"
 
 AGENT_SPEC = {
   "service": "TVibe FILTER",
-  "description": "Solana token signal API for AI agents. Give it a token mint, get a verdict plus the reasons. Not financial advice.",
+  "description": "Solana token signal API for AI agents. Give it a mint, get a verdict plus reasons. Not financial advice.",
   "base_url": "https://signal-api-24q4.onrender.com",
-  "start_here": "GET /agent.json (this file) or GET /agent (same spec in Markdown). Then call /omni.",
+  "start_here": "GET /agent.json (this file) or GET /agent (Markdown). Then call /omni.",
   "endpoints": {
-    "/omni": "MAIN endpoint. GET /omni?mint=<MINT>. Also accepts ?request=<MINT>. Returns JSON.",
+    "/omni": "MAIN. GET /omni?mint=<MINT>. Also accepts ?request=<MINT>.",
     "/play": "Same builder as /omni. GET /play?mint=<MINT>.",
-    "/stats": "Aggregate stats: tracked tokens, bad-in-24h share, avoid-vs-ok gap.",
-    "/health": "Health check. Returns status plus version.",
+    "/stats": "Aggregate stats.",
+    "/health": "Health check.",
     "/agent.json": "This spec, machine-readable.",
-    "/agent": "Same spec in Markdown.",
-    "/": "Human demo page: paste a mint, press CHECK. It calls /omni and renders the same JSON."
+    "/agent": "Same spec in Markdown."
   },
-  "request": {"mint": "Required. Solana token mint address, base58, 32-44 chars."},
+  "request": {"mint": "Required. Solana token mint, base58, 32-44 chars."},
   "response": {
     "always_http_200": True,
-    "error_field": "If 'error' is present, the token could NOT be evaluated. Treat as SKIP. Never trade on an error response.",
+    "error_field": "If 'error' is present, the token could NOT be evaluated. Treat as SKIP.",
     "fields": {
       "mint": "Echo of the requested mint.",
-      "verdict": "PASS | REVIEW | CAUTION | AVOID | SKIP. See verdicts.",
-      "risk": "Risk score 0-100. Higher = riskier. 0 = cleanest seen (SOL). 80 = dangerous (COA).",
-      "liquidity": "Pool liquidity in USD. Below about $5,000 is very low.",
+      "verdict": "PASS | REVIEW | CAUTION | AVOID | SKIP.",
+      "risk": "Risk score 0-100. Higher = riskier.",
+      "liquidity": "Pool liquidity in USD.",
       "price": "Token price in USD.",
-      "signals": "List of snake_case signal codes explaining the verdict. See signals glossary.",
-      "nfa": "True. Not financial advice flag."
+      "signals": "Snake_case codes explaining the verdict.",
+      "nfa": "True. Not financial advice flag.",
+      "fallback": "True when the answer came from the direct DexScreener fallback."
     }
   },
   "verdicts": {
-    "PASS": "No hard blockers. Token passed the filters. Still do your own research.",
-    "REVIEW": "Mixed signals. Look closer before deciding.",
-    "CAUTION": "Material risks present. Only trade small size, or skip unless you know why.",
-    "AVOID": "Hard blockers present (for example dominant holder, unverified LP, dead pool). Do not buy.",
-    "SKIP": "No usable pair or no data. Cannot evaluate."
+    "PASS": "No hard blockers. Still do your own research.",
+    "REVIEW": "Mixed signals. Look closer.",
+    "CAUTION": "Material risks. Small size or skip.",
+    "AVOID": "Hard blockers. Do not buy.",
+    "SKIP": "No usable pair or no data."
   },
   "signals": {
     "very_low_liquidity": "Liquidity extremely low. Hard to exit.",
     "low_liquidity": "Liquidity low.",
-    "no_recent_trades": "No trades recently. Nobody is trading it.",
+    "no_recent_trades": "No trades recently.",
     "dead_pool": "Pool inactive or dead.",
-    "extreme_holder_concentration": "Top holders own most of the supply.",
     "dominant_holder": "One holder dominates. Rug risk.",
-    "lp_unverified": "LP not verified. Liquidity may not be locked.",
-    "heavy_buying": "Unusually heavy buying.",
-    "high_turnover": "High turnover.",
+    "lp_unverified": "LP not verified.",
     "new_pair": "Pair recently created.",
-    "high_activity": "High on-chain activity.",
-    "mint_revoked": "Mint authority revoked. Good: supply cannot be inflated.",
-    "freeze_revoked": "Freeze authority revoked. Good: holders cannot be frozen."
+    "mint_revoked": "Mint authority revoked. Good.",
+    "freeze_revoked": "Freeze authority revoked. Good."
   },
   "rules_for_agents": [
-    "Always check the 'error' field first. Error means SKIP, not a verdict.",
-    "Verdict is driven by blockers/signals, not by the risk number alone. A low risk number with bad blockers can still be CAUTION or AVOID.",
-    "AVOID means do not buy. CAUTION means small size or skip. PASS is not a buy recommendation.",
-    "Re-check before trading. Liquidity and holders change fast.",
-    "This API is a filter, not financial advice."
+    "Check the 'error' field first. Error means SKIP.",
+    "Verdict comes from blockers/signals, not the risk number alone.",
+    "AVOID means do not buy. PASS is not a buy recommendation.",
+    "Re-check before trading.",
+    "Fallback answers (fallback=true) never return PASS."
   ],
   "examples": {
-    "curl_pass": "curl 'https://signal-api-24q4.onrender.com/omni?mint=So11111111111111111111111111111111111111112'",
-    "curl_any_token": "curl 'https://signal-api-24q4.onrender.com/omni?mint=<MINT>'"
+    "curl": "curl 'https://signal-api-24q4.onrender.com/omni?mint=So11111111111111111111111111111111111111112'"
   }
 }
 
 AGENT_MD = """# TVibe FILTER — agent spec
-Solana token signal API for AI agents. Give it a mint, get a verdict plus reasons. Not financial advice.
+Solana token signal API. Give it a mint, get a verdict plus reasons. Not financial advice.
 Base URL: https://signal-api-24q4.onrender.com
 
 ## Quickstart
 - Read this file: GET /agent  |  Machine-readable: GET /agent.json
 - Check a token: GET /omni?mint=<MINT>  (also accepts ?request=<MINT>)
-- Same builder: GET /play?mint=<MINT>
-- Stats: GET /stats  |  Health: GET /health  |  Demo page: GET /
+- Same builder: GET /play?mint=<MINT>  |  Stats: GET /stats  |  Health: GET /health
 
 ## Response
-Always HTTP 200 JSON. If `error` is present, the token could NOT be evaluated -> treat as SKIP, never trade on it.
-Fields: mint, verdict, risk (0-100, higher = riskier), liquidity (USD), price (USD), signals (snake_case codes), nfa=true.
+Always HTTP 200 JSON. If `error` is present -> treat as SKIP, never trade on it.
+Fields: mint, verdict, risk (0-100), liquidity (USD), price (USD), signals, nfa=true, fallback (bool).
 
 ## Verdicts
-- PASS: no hard blockers, passed filters. Still DYOR.
-- REVIEW: mixed signals, look closer.
-- CAUTION: material risks. Small size or skip.
-- AVOID: hard blockers (dominant holder, unverified LP, dead pool). Do not buy.
+- PASS: no hard blockers. Still DYOR. - REVIEW: mixed signals.
+- CAUTION: material risks. Small size or skip. - AVOID: hard blockers, do not buy.
 - SKIP: no usable pair or no data.
-
-## Signals
-- very_low_liquidity / low_liquidity: hard to exit.
-- no_recent_trades: nobody trading it. dead_pool: pool inactive.
-- extreme_holder_concentration / dominant_holder: few wallets own most supply, rug risk.
-- lp_unverified: LP not verified, may not be locked.
-- heavy_buying / high_turnover / new_pair / high_activity: activity signals.
-- mint_revoked / freeze_revoked: authorities revoked, good.
 
 ## Rules
 1. Check `error` first. 2. Verdict comes from blockers, not the risk number alone.
-3. AVOID = do not buy. 4. Re-check before trading. 5. Filter, not financial advice.
+3. AVOID = do not buy. 4. Re-check before trading. 5. Fallback answers never return PASS.
 
 ## Example
 curl 'https://signal-api-24q4.onrender.com/omni?mint=So11111111111111111111111111111111111111112'
@@ -147,73 +108,15 @@ async def _send(send, status, headers, body, ctype):
                                             (b"content-length", str(len(body)).encode())]})
     await send({"type": "http.response.body", "body": body})
 
-async def _build(g, client, mint):
-    """Call the real builder. NEVER raise — return error JSON instead."""
-    try:
-        b = g.get("build_omni")
-        if callable(b):
-            r = await b(client, mint)
-            return r if isinstance(r, dict) else {"mint": mint, "error": "bad_packet", "nfa": True}
-        s = g.get("build_signal")
-        if callable(s):
-            r = await s(client, mint, security=True)
-            if isinstance(r, tuple) and r:
-                r = r[0]
-            return r if isinstance(r, dict) else {"mint": mint, "error": "empty", "nfa": True}
-        return {"mint": mint, "error": "no_builder", "nfa": True}
-    except Exception as e:
-        return {"mint": mint, "error": f"upstream_or_no_pair: {e}"[:240],
-                "action": "review", "verdict": "review", "nfa": True}
-
-def _register(g):
-    app = g.get("app")
-    if app is None or not hasattr(app, "router"):
-        return
-    try:
-        app.router.routes[:] = [r for r in app.router.routes
-                                if getattr(r, "path", None) not in ("/omni", "/play")]
-    except Exception:
-        pass
-    from fastapi import Query, Request
-
-    @app.get("/omni", tags=["product"])
-    async def omni_v9(request: Request, mint: str | None = Query(default=None)):
-        m = (mint or request.query_params.get("mint")
-             or request.query_params.get("request") or "").strip()
-        if not MINT_RE.match(m):
-            return {"error": "Invalid Solana token mint address", "mint": m}
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=25.0) as client:
-                return await _build(g, client, m)
-        except Exception as e:
-            return {"mint": m, "error": f"upstream_or_no_pair: {e}"[:240],
-                    "action": "review", "verdict": "review", "nfa": True}
-
-    @app.get("/play", tags=["product"])
-    async def play_v9(request: Request, mint: str | None = Query(default=None)):
-        m = (mint or request.query_params.get("mint")
-             or request.query_params.get("request") or "").strip()
-        if not m:
-            return {"error": "mint is required: /play?mint=<MINT>", "mint": None}
-        if not MINT_RE.match(m):
-            return {"error": "Invalid Solana token mint address", "mint": m}
-        try:
-            import httpx
-            async with httpx.AsyncClient(timeout=25.0) as client:
-                return await _build(g, client, m)
-        except Exception as e:
-            return {"mint": m, "error": f"upstream_or_no_pair: {e}"[:240],
-                    "action": "review", "verdict": "review", "nfa": True}
-    print("[patch_live_fix] /omni + /play registered (v16, builder wrapped)")
 
 class LiveFixASGI:
-    def __init__(self, inner, version, g=None):
+    def __init__(self, inner, version):
         self.inner = inner
         self.version = version
-        self.g = g or {}
+
     def __getattr__(self, name):
         return getattr(self.inner, name)
+
     async def __call__(self, scope, receive, send):
         if scope.get("type") == "http" and scope.get("method") == "GET" \
                 and scope.get("path") in ("/agent.json", "/agent", "/spec"):
@@ -225,15 +128,194 @@ class LiveFixASGI:
                             AGENT_MD.encode("utf-8"), b"text/markdown; charset=utf-8")
             return
         if scope.get("type") == "http" and scope.get("path") == "/__main_status":
-            body = json.dumps({"main_py": "v4", "patch_live_fix": "v16-mini",
-                               "fix": "asgi omni/play + readable badges"}).encode()
+            body = json.dumps({"main_py": "v4", "patch_live_fix": "v17",
+                               "fix": "omni DexScreener fallback"}).encode()
             await _send(send, 200, [(b"cache-control", b"no-store")], body, b"application/json")
             return
-        # v8: answer /omni + /play HERE at ASGI level. Route registration
-        # in _register silently fails once the app is wrapped, leaving
-        # /omni at FastAPI 404 {"detail": "Not Found"}. This bypasses
-        # routing entirely — same trick that makes /__main_status work.
         if scope.get("type") == "http" and scope.get("method") == "GET" \
-                and scope.get("path") in ("/omni", "/play"):
+                and scope.get("path") in ("/omni", "/play", "/signal", "/signals"):
             try:
-                from urllib.parse import
+                from urllib.parse import parse_qsl, urlencode
+                qs = scope.get("query_string", b"").decode("latin-1")
+                params = parse_qsl(qs, keep_blank_values=True)
+                keys = {k for k, _ in params}
+                d = dict(params)
+                mint = d.get("mint") or d.get("request") or ""
+                if mint and "request" not in keys:
+                    params.append(("request", mint))
+                if mint and "mint" not in keys:
+                    params.append(("mint", mint))
+                scope = dict(scope)
+                scope["query_string"] = urlencode(params).encode("latin-1")
+            except Exception as e:
+                print(f"[patch_live_fix] query rewrite failed (non-fatal): {e}")
+        if (scope.get("type") != "http" or scope.get("method") != "GET"
+                or scope.get("path") not in ("/", "/health")):
+            return await self.inner(scope, receive, send)
+        path = scope["path"]
+        start, chunks, err = None, [], None
+
+        async def cap(message):
+            nonlocal start
+            if message["type"] == "http.response.start":
+                start = message
+            elif message["type"] == "http.response.body":
+                chunks.append(message.get("body", b""))
+
+        try:
+            await self.inner(scope, receive, cap)
+        except Exception as e:
+            err = e
+        status = start["status"] if start else 500
+        headers = list(start["headers"]) if start else []
+        body = b"".join(chunks)
+        if path == "/health" and (err is not None or start is None or status >= 500):
+            note = (repr(err) if err is not None else "health_handler_status_%s" % status)[:240]
+            out = {"status": "degraded", "version": str(self.version), "ts": int(time.time()),
+                   "loader": "main", "health_error": note}
+            await _send(send, 200, [(b"cache-control", b"no-store")],
+                        json.dumps(out).encode(), b"application/json")
+            return
+        keep = [(k, v) for k, v in headers if k.lower() != b"content-length"]
+        await send({"type": "http.response.start", "status": status,
+                    "headers": keep + [(b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
+
+async def _dex_fallback(client, mint):
+    """Direct DexScreener query. Never raises. Conservative verdicts only."""
+    try:
+        resp = await client.get(DEX_URL + mint, timeout=12.0,
+                                headers={"User-Agent": "TVibe-FILTER/1.0"})
+        data = resp.json() if resp.status_code == 200 else {}
+    except Exception as e:
+        return {"mint": mint, "verdict": "SKIP", "error": "fallback_upstream_failed",
+                "detail": repr(e)[:200], "nfa": True, "fallback": True}
+    pairs = [p for p in (data.get("pairs") or []) if isinstance(p, dict)
+             and ((p.get("baseToken") or {}).get("address") == mint)]
+    if not pairs:
+        return {"mint": mint, "verdict": "SKIP", "error": "no_pair",
+                "note": "DexScreener returned no pairs for this mint (fallback path).",
+                "nfa": True, "fallback": True}
+    best = max(pairs, key=lambda p: ((p.get("liquidity") or {}).get("usd") or 0))
+    liq = ((best.get("liquidity") or {}).get("usd") or 0) or 0
+    price = best.get("priceUsd")
+    signals = []
+    if liq < 5000:
+        signals.append("very_low_liquidity")
+    elif liq < 20000:
+        signals.append("low_liquidity")
+    tx5 = ((best.get("txns") or {}).get("m5") or {})
+    if ((tx5.get("buys") or 0) + (tx5.get("sells") or 0)) == 0:
+        signals.append("no_recent_trades")
+    created = best.get("pairCreatedAt")
+    if created and (time.time() * 1000 - created) < 86400000:
+        signals.append("new_pair")
+    if liq < 5000:
+        verdict, risk = "CAUTION", 60
+    elif liq < 20000:
+        verdict, risk = "CAUTION", 45
+    else:
+        verdict, risk = "REVIEW", 30
+    try:
+        price = float(price) if price is not None else None
+    except Exception:
+        price = None
+    return {"mint": mint, "verdict": verdict, "risk": risk, "risk_score": risk,
+            "liquidity": liq, "liquidity_usd": liq, "price": price, "price_usd": price,
+            "signals": signals, "pair": best.get("dexId"),
+            "quote": ((best.get("quoteToken") or {}).get("symbol")),
+            "nfa": True, "fallback": True,
+            "note": "Fallback verdict from DexScreener direct: authorities not verified here, so PASS is never returned."}
+
+
+def _ensure_omni_play(g):
+    app = g.get("app")
+    if app is None:
+        print("[patch_live_fix] no app — skip /omni + /play")
+        return
+    try:
+        app.router.routes[:] = [r for r in app.router.routes
+                                if getattr(r, "path", None) not in ("/omni", "/play")]
+    except Exception as e:
+        print("[patch_live_fix] could not remove old /omni+/play:", e)
+    from fastapi import Query, Request
+    build_omni = g.get("build_omni")
+    build_signal = g.get("build_signal")
+
+    async def _resolve(client, mint):
+        pkt = None
+        if callable(build_omni):
+            try:
+                pkt = await build_omni(client, mint)
+            except Exception as e:
+                print("[patch_live_fix] build_omni failed, fallback:", repr(e)[:200])
+                pkt = None
+        if (not isinstance(pkt, dict)) or pkt.get("error"):
+            if callable(build_signal):
+                try:
+                    r = await build_signal(client, mint, security=True)
+                    if isinstance(r, tuple) and r:
+                        r = r[0]
+                    if isinstance(r, dict) and not r.get("error"):
+                        pkt = r
+                except Exception as e:
+                    print("[patch_live_fix] build_signal failed, fallback:", repr(e)[:200])
+        if (not isinstance(pkt, dict)) or pkt.get("error"):
+            print("[patch_live_fix] omni fallback used for", mint)
+            pkt = await _dex_fallback(client, mint)
+        return pkt
+
+    async def _run(mint):
+        import httpx
+        async with httpx.AsyncClient(timeout=25.0) as client:
+            return await _resolve(client, mint)
+
+    @app.get("/omni", tags=["product"])
+    async def omni_v17(request: Request, mint: str | None = Query(default=None)):
+        _mint = (mint or request.query_params.get("mint")
+                 or request.query_params.get("request") or "").strip()
+        if not MINT_RE.match(_mint):
+            return {"mint": _mint, "verdict": "SKIP", "error": "invalid_mint", "nfa": True}
+        return await _run(_mint)
+
+    @app.get("/play", tags=["product"])
+    async def play_v17(request: Request, mint: str | None = Query(default=None)):
+        _mint = (mint or request.query_params.get("mint")
+                 or request.query_params.get("request") or "").strip()
+        if not _mint:
+            return {"mint": None, "verdict": "SKIP",
+                    "error": "mint is required: /play?mint=<MINT>", "nfa": True}
+        if not MINT_RE.match(_mint):
+            return {"mint": _mint, "verdict": "SKIP", "error": "invalid_mint", "nfa": True}
+        return await _run(_mint)
+
+    print("[patch_live_fix] /omni + /play registered (v17, DexScreener fallback)")
+
+
+def _omni_impl_sync(mint):
+    """Sync fallback for main.py FIX 1 (_play_fixed reads g['omni_impl'])."""
+    import asyncio as _aio
+
+    async def _go():
+        import httpx as _hx
+        async with _hx.AsyncClient(timeout=25.0) as _c:
+            return await _dex_fallback(_c, (mint or "").strip())
+
+    try:
+        return _aio.run(_go())
+    except Exception as _e:
+        return {"mint": mint, "verdict": "SKIP", "error": "omni_impl_failed",
+                "detail": repr(_e)[:200], "nfa": True}
+
+
+def apply(g: dict) -> None:
+    if not isinstance(g, dict):
+        raise TypeError("apply expects shared globals dict")
+    _ensure_omni_play(g)
+    g.setdefault("omni_impl", _omni_impl_sync)
+    app = g.get("app")
+    if app is not None and not isinstance(app, LiveFixASGI):
+        version = g.get("VERSION") or getattr(app, "version", None) or "live-fix"
+        g["app"] = LiveFixASGI(app, version)
+    print("[patch_live_fix] applied v17 (omni fallback + agent spec + asgi wrapper)")
