@@ -1,39 +1,34 @@
-"""patch_live_fix.py — v21, the polished one (paste-safe, complete replacement).
-API: /omni + /play at ASGI layer — inner fails or errors -> DexScreener
-fallback, always HTTP 200, never PASS. Fallback math fully guarded.
-Homepage: injects polished check() + English-only static text — 4-card grid, TOKEN TO SELL label,
-plain-English flags, error cards, agent links. Also probe, query
-rewrite, /health never-500, /agent + /agent.json.
+"""patch_live_fix.py — v22, the deep one (paste-safe, complete replacement).
+API: /omni + /play at ASGI layer. Chain: deep engine (patch_builder)
+first, then inner app, then lite DexScreener fallback. Always HTTP 200.
+Homepage: injects polished check() — 4-card grid, TOKEN TO SELL label,
+plain-English flags, positives, error cards, agent links. Plus probe,
+query rewrite, /health never-500, /agent + /agent.json.
 """
 from __future__ import annotations
 import asyncio, json, re, time
 import urllib.request
+_ENGINE = None  # set in apply(): patch_builder full engine, else lite fallback
 
 MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 DEX_URL = "https://api.dexscreener.com/latest/dex/tokens/"
 
-AGENT_SPEC = {
-  "service": "TVibe FILTER",
-  "description": "Solana token signal API for AI agents. Give it a mint, get a verdict plus reasons. Not financial advice.",
-  "base_url": "https://signal-api-24q4.onrender.com",
-  "start_here": "GET /agent.json (this file) or GET /agent (Markdown). Then call /omni.",
-  "endpoints": {"/omni": "MAIN. GET /omni?mint=<MINT>. Also accepts ?request=<MINT>.", "/play": "Same builder as /omni. GET /play?mint=<MINT>.", "/stats": "Aggregate stats.", "/health": "Health check.", "/agent.json": "This spec.", "/agent": "Same spec in Markdown."},
-  "request": {"mint": "Required. Solana token mint, base58, 32-44 chars."},
-  "response": {"always_http_200": True, "error_field": "If 'error' is present, the token could NOT be evaluated. Treat as SKIP.",
-    "fields": {"mint": "Echo.", "verdict": "PASS | REVIEW | CAUTION | AVOID | SKIP.", "risk": "Risk score 0-100.", "liquidity": "Pool liquidity USD.", "price": "Price USD.", "signals": "Codes explaining the verdict.", "nfa": True, "fallback": "True when answered by the direct DexScreener fallback."}},
-  "verdicts": {"PASS": "No hard blockers. Still DYOR.", "REVIEW": "Mixed signals.", "CAUTION": "Material risks. Small size or skip.", "AVOID": "Hard blockers. Do not buy.", "SKIP": "No usable pair or no data."},
-  "signals": {"very_low_liquidity": "Liquidity extremely low. Hard to exit.", "low_liquidity": "Liquidity low.", "no_recent_trades": "No trades recently.", "dead_pool": "Pool inactive or dead.", "dominant_holder": "One holder dominates. Rug risk.", "lp_unverified": "LP not verified.", "new_pair": "Pair recently created.", "mint_revoked": "Mint authority revoked. Good.", "freeze_revoked": "Freeze authority revoked. Good."},
-  "rules_for_agents": ["Check 'error' first. Error means SKIP.", "Verdict comes from blockers/signals, not the risk number alone.", "AVOID means do not buy. PASS is not a buy recommendation.", "Re-check before trading.", "Fallback answers (fallback=true) never return PASS."],
-}
+AGENT_SPEC = {"name": "TVibe FILTER", "version": "v22", "base": "https://signal-api-24q4.onrender.com",
+  "quickstart": {"spec": "GET /agent", "machine": "GET /agent.json", "verdict": "GET /omni?mint=<MINT>",
+    "play": "GET /play", "stats": "GET /stats", "health": "GET /health"},
+  "response": "Always HTTP 200 JSON. If `error` present -> SKIP, never trade on it.",
+  "fields": ["mint", "verdict", "risk", "liquidity", "price", "signals", "blockers", "cautions", "positives", "unknowns", "nfa", "engine"],
+  "verdicts": {"PASS": "no hard blockers", "REVIEW": "mixed / wait 15 min", "CAUTION": "material risks",
+    "AVOID": "hard blockers, do not buy", "SKIP": "no usable pair"},
+  "rules": ["Check `error` first", "Verdict from blockers, not risk alone", "AVOID = do not buy",
+    "Re-check before trading", "Lite fallback never returns PASS"]}
 
 AGENT_MD = """# TVibe FILTER — agent spec
 Solana token signal API. Give it a mint, get a verdict plus reasons. Not financial advice.
 Base URL: https://signal-api-24q4.onrender.com
 Quickstart: GET /agent (this) | GET /agent.json (machine) | GET /omni?mint=<MINT> | GET /play | GET /stats | GET /health
-Response: always HTTP 200 JSON. If `error` is present -> SKIP, never trade on it.
-Fields: mint, verdict, risk (0-100), liquidity (USD), price (USD), signals, nfa=true, fallback (bool).
-Verdicts: PASS no hard blockers (still DYOR) | REVIEW mixed | CAUTION material risks | AVOID hard blockers, do not buy | SKIP no usable pair.
-Rules: 1. Check `error` first. 2. Verdict from blockers, not risk number alone. 3. AVOID = do not buy. 4. Re-check before trading. 5. Fallback never returns PASS.
+Response: always HTTP 200 JSON. If `error` present -> SKIP, never trade on it. Fields: mint, verdict, risk (0-100), liquidity (USD), price (USD), signals, blockers, cautions, positives, unknowns, engine, nfa=true.
+Verdicts: PASS no hard blockers (still DYOR) | REVIEW mixed | CAUTION material risks | AVOID hard blockers, do not buy | SKIP no usable pair. Rules: 1. Check `error` first. 2. Verdict from blockers, not risk alone. 3. AVOID = do not buy. 4. Re-check before trading. 5. Lite fallback never returns PASS.
 """
 
 
@@ -44,7 +39,7 @@ if(!o)return;
 var e=function(s){return String(s==null?'':s).replace(/[&<>"]/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];});};
 var n=function(v,d){if(v==null||v==='')return'—';var x=Number(v);return isFinite(x)?x.toLocaleString('en-US',{maximumFractionDigits:d}):e(v);};
 var sh=function(x){return x.length>10?x.slice(0,4)+'…'+x.slice(-4):x;};
-var F={'very_low_liquidity':'Liquidity extremely low — hard to exit','low_liquidity':'Liquidity low','no_recent_trades':'No recent trades','dead_pool':'Pool dead / inactive','dominant_holder':'One holder owns too much — rug risk','lp_unverified':'LP not verified','new_pair':'Pair recently created','mint_revoked':'Mint authority revoked — good','freeze_revoked':'Freeze authority revoked — good','no_pair':'No pair'};
+var F={'very_low_liquidity':'Liquidity extremely low — hard to exit','low_liquidity':'Liquidity low','no_recent_trades':'No recent trades','dead_pool':'Pool dead / inactive','dominant_holder':'One holder owns too much — rug risk','lp_unverified':'LP not verified','new_pair':'Pair recently created','mint_revoked':'Mint authority revoked — good','freeze_revoked':'Freeze authority revoked — good','no_pair':'No pair','mint_active':'Mint authority still active — dev can mint more','freeze_active':'Freeze authority still active — holders can be frozen','holders_distributed':'No dominant holder','lp_low_lock':'LP lock below 50%','lp_locked':'LP mostly locked','high_exit_slippage':'High exit slippage','low_exit_slippage':'Low exit slippage','two_stage_hold':'First seen less than 15 min ago — two-stage check'};
 var ft=function(x){return F[x]||String(x);};
 if(!m){o.innerHTML='<b>Paste a mint first.</b>';return;}
 if(!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(m)){o.innerHTML='<b>Not a mint — 32-44 base58 chars, paste the full address.</b>';return;}
@@ -84,8 +79,9 @@ var grid='<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:
 +card('LIQUIDITY','$'+n(liq,0),'')
 +card('PRICE','$'+n(price,8),'')+'</div>';
 var flHtml=fl.length?'<ul style="margin:8px 0;padding-left:18px">'+fl.map(function(x){return'<li style="color:#ddd">'+e(ft(typeof x==='string'?x:JSON.stringify(x)))+'</li>';}).join('')+'</ul>':'';
-var note=d.fallback?'<div style="font-size:12px;color:#FFC107;margin-top:6px">Fallback result — mint/freeze not verified here, so no PASS.</div>':'';
-o.innerHTML=head+'<div style="font-size:16px;font-weight:800">LIVE</div>'+grid+flHtml+note+'<br>'+links+ag;
+var psHtml=(d.positives&&d.positives.length)?'<ul style="margin:8px 0;padding-left:18px">'+d.positives.slice(0,4).map(function(x){return'<li style="color:#00D26A">'+e(typeof x==='string'?x:JSON.stringify(x))+'</li>';}).join('')+'</ul>':'';
+var note=d.note?'<div style="font-size:12px;color:#FFC107;margin-top:6px">'+e(d.note)+'</div>':(d.fallback?'<div style="font-size:12px;color:#FFC107;margin-top:6px">Fallback result — mint/freeze not verified here, so no PASS.</div>':'');
+o.innerHTML=head+'<div style="font-size:16px;font-weight:800">LIVE</div>'+grid+flHtml+psHtml+note+'<br>'+links+ag;
 }catch(err){
 o.innerHTML=head+'<div style="border:1px solid #555;background:#1a1a1a;padding:12px"><b>'+(err&&err.name==='AbortError'?'Timed out — server may be waking up, hit CHECK again.':'Network error — try again.')+'</b></div><br>'+links+ag;}
 }
@@ -119,7 +115,7 @@ class LiveFixASGI:
                             AGENT_MD.encode("utf-8"), b"text/markdown; charset=utf-8")
             return
         if scope.get("type") == "http" and scope.get("path") == "/__main_status":
-            body = json.dumps({"main_py": "v4", "patch_live_fix": "v21",
+            body = json.dumps({"main_py": "v4", "patch_live_fix": "v22",
                                "fix": "omni DexScreener fallback"}).encode()
             await _send(send, 200, [(b"cache-control", b"no-store")], body, b"application/json")
             return
@@ -140,7 +136,7 @@ class LiveFixASGI:
                 scope["query_string"] = urlencode(params).encode("latin-1")
             except Exception as e:
                 print(f"[patch_live_fix] query rewrite failed (non-fatal): {e}")
-        # 2b) /omni + /play: never 404/500 — inner fails or errors -> fallback.
+        # 2b) /omni + /play: engine first (deep builder), then inner, then lite.
         if scope.get("type") == "http" and scope.get("method") == "GET" \
                 and scope.get("path") in ("/omni", "/play"):
             try:
@@ -151,17 +147,24 @@ class LiveFixASGI:
             except Exception:
                 _mint = ""
             if _mint and MINT_RE.match(_mint):
-                _start, _chunks = None, []
-
-                async def _cap2(message):
-                    nonlocal _start
-                    if message["type"] == "http.response.start":
-                        _start = message
-                    elif message["type"] == "http.response.body":
-                        _chunks.append(message.get("body", b""))
-
+                _eng = None
                 try:
-                    await asyncio.wait_for(self.inner(scope, receive, _cap2), timeout=30)
+                    _eng = await asyncio.to_thread((_ENGINE or _dex_fallback_sync), _mint)
+                except Exception as _e:
+                    print("[patch_live_fix] engine failed:", repr(_e)[:200])
+                if isinstance(_eng, dict) and _eng.get("verdict") in ("PASS", "REVIEW", "CAUTION", "AVOID") and not _eng.get("error"):
+                    await _send(send, 200, [(b"cache-control", b"no-store")], json.dumps(_eng).encode(), b"application/json")
+                    return
+                if isinstance(_eng, dict) and _eng.get("error") == "no_pair":
+                    await _send(send, 200, [(b"cache-control", b"no-store")], json.dumps(_eng).encode(), b"application/json")
+                    return
+                _start, _chunks = None, []
+                async def _cap2(m):
+                    nonlocal _start
+                    if m["type"] == "http.response.start": _start = m
+                    elif m["type"] == "http.response.body": _chunks.append(m.get("body", b""))
+                try:
+                    await asyncio.wait_for(self.inner(scope, receive, _cap2), timeout=15)
                 except Exception as _e:
                     print("[patch_live_fix] omni inner failed:", repr(_e)[:200])
                     _start = None
@@ -170,20 +173,15 @@ class LiveFixASGI:
                 _ok = False
                 if _status == 200:
                     try:
-                        _pkt0 = json.loads(_body.decode("utf-8", "ignore"))
-                        _ok = isinstance(_pkt0, dict) and not _pkt0.get("error") and _pkt0.get("verdict")
-                    except Exception:
-                        _ok = False
+                        _pkt0 = json.loads(_body.decode("utf-8", "ignore")); _ok = isinstance(_pkt0, dict) and not _pkt0.get("error") and _pkt0.get("verdict")
+                    except Exception: _ok = False
                 if _ok:
-                    _h = list(_start["headers"]) if _start else []
-                    _keep = [(k, v) for k, v in _h if k.lower() != b"content-length"]
-                    await send({"type": "http.response.start", "status": _status,
-                                "headers": _keep + [(b"content-length", str(len(_body)).encode())]})
+                    _keep = [(k, v) for k, v in (list(_start["headers"]) if _start else []) if k.lower() != b"content-length"]
+                    await send({"type": "http.response.start", "status": _status, "headers": _keep + [(b"content-length", str(len(_body)).encode())]})
                     await send({"type": "http.response.body", "body": _body})
                     return
-                _pkt = await asyncio.to_thread(_dex_fallback_sync, _mint)
-                await _send(send, 200, [(b"cache-control", b"no-store")],
-                            json.dumps(_pkt).encode(), b"application/json")
+                _pkt = _eng if isinstance(_eng, dict) and _eng.get("error") else {"mint": _mint, "verdict": "SKIP", "error": "upstream_failed", "note": "Engine + inner app both failed.", "nfa": True}
+                await _send(send, 200, [(b"cache-control", b"no-store")], json.dumps(_pkt).encode(), b"application/json")
                 return
             return await self.inner(scope, receive, send)
         if (scope.get("type") != "http" or scope.get("method") != "GET"
@@ -243,8 +241,7 @@ def _dex_fallback_sync(mint):
     try:
         if not isinstance(data, dict):
             data = {}
-        pairs = [p for p in (data.get("pairs") or []) if isinstance(p, dict)
-                 and ((p.get("baseToken") or {}).get("address") if isinstance(p.get("baseToken") or {}, dict) else None) == mint]
+        pairs = [p for p in (data.get("pairs") or []) if isinstance(p, dict) and ((p.get("baseToken") or {}).get("address") if isinstance(p.get("baseToken") or {}, dict) else None) == mint]
         if not pairs:
             return {"mint": mint, "verdict": "SKIP", "error": "no_pair",
                     "note": "DexScreener returned no pairs for this mint (fallback path).",
@@ -301,20 +298,18 @@ async def _dex_fallback(client, mint):
 
 # No FastAPI route registration: the ASGI wrapper answers /omni + /play itself.
 def _omni_impl_sync(mint):
-    """Sync fallback for main.py FIX 1."""
+    """Sync engine for main.py FIX 1 (/play): deep builder if present, else lite."""
     try:
-        return _dex_fallback_sync((mint or "").strip())
-    except Exception as _e:
+        return (_ENGINE or _dex_fallback_sync)((mint or "").strip())
+    except Exception as e:
         return {"mint": mint, "verdict": "SKIP", "error": "omni_impl_failed",
-                "detail": repr(_e)[:200], "nfa": True}
+                "detail": repr(e)[:200], "nfa": True}
 
 
 def apply(g: dict) -> None:
     if not isinstance(g, dict):
         raise TypeError("apply expects shared globals dict")
     g.setdefault("omni_impl", _omni_impl_sync)
-    app = g.get("app")
-    if app is not None and not isinstance(app, LiveFixASGI):
-        version = g.get("VERSION") or getattr(app, "version", None) or "live-fix"
-        g["app"] = LiveFixASGI(app, version)
-    print("[patch_live_fix] applied v21 (omni fallback + agent spec + asgi wrapper)")
+    global _ENGINE
+    _ENGINE = g.get("full_builder") or _dex_fallback_sync
+    print("[patch_live_fix] engi
