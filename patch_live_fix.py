@@ -4,7 +4,10 @@ Guarantees (even if older core / partial loader):
 1. GET /omni exists (alias -> build_omni / build_signal) if nothing registered it
 2. Homepage check() is ALWAYS the live version (calls /omni, never the hash() demo),
    with correct verdict mapping (ok/caution/avoid -> PASS/REVIEW/SKIP) and clear errors
-3. GET /health never returns 500 (the existing /health is KEPT; a fallback is only used on failure)
+3. GET /health never returns 500 (the existing /health is KEPT; a fallback JSON with the error note is used on failure)
+
+Implemented as a pure-ASGI wrapper around the app (no add_middleware, so it cannot fail with
+"cannot add middleware after app started"). main.py exports the wrapped app.
 
 Wired in main.py AFTER all other patches. NFA. Lean only.
 """
@@ -188,89 +191,91 @@ def _ensure_omni(g: dict) -> None:
     print("[patch_live_fix] /omni registered (fallback)")
 
 
-def _install_health_guard(g: dict) -> None:
-    """Keep the existing rich /health; only step in if it errors. Adds loader=main marker."""
-    app = g.get("app")
-    if app is None:
-        return
-    from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.responses import JSONResponse, Response
+class LiveFixASGI:
+    """Pure ASGI wrapper: patches GET / (live check) and guards GET /health. Everything else passes through."""
 
-    VERSION = g.get("VERSION") or getattr(app, "version", None) or "live-fix"
+    def __init__(self, inner, version="?"):
+        self.inner = inner
+        self.version = version
 
-    def _fallback(err: str = "") -> JSONResponse:
-        out = {"status": "ok", "degraded": True, "version": str(VERSION), "ts": int(time.time()),
-               "loader": "main", "patch": "live_fix"}
-        if err:
-            out["note"] = err[:120]
-        return JSONResponse(out, headers={"Cache-Control": "no-store"})
+    def __getattr__(self, name):  # proxy .state, .routes, .openapi ... to the real app
+        return getattr(self.inner, name)
 
-    class HealthGuard(BaseHTTPMiddleware):
-        async def dispatch(self, request, call_next):
-            if request.url.path != "/health":
-                return await call_next(request)
-            try:
-                resp = await call_next(request)
-            except Exception as e:  # never 500 on /health
-                return _fallback(str(e))
-            if resp.status_code >= 500:
-                return _fallback("health_handler_error")
-            try:
-                if "json" in (resp.headers.get("content-type") or ""):
-                    body = b""
-                    async for chunk in resp.body_iterator:
-                        body += chunk
+    async def __call__(self, scope, receive, send):
+        if (scope.get("type") != "http" or scope.get("method") != "GET"
+                or scope.get("path") not in ("/", "/health")):
+            return await self.inner(scope, receive, send)
+
+        path = scope["path"]
+        start = None
+        chunks = []
+        err = None
+
+        async def cap(message):
+            nonlocal start
+            if message["type"] == "http.response.start":
+                start = message
+            elif message["type"] == "http.response.body":
+                chunks.append(message.get("body", b""))
+
+        try:
+            await self.inner(scope, receive, cap)
+        except Exception as e:  # inner app crashed (ServerErrorMiddleware re-raises after replying)
+            err = e
+
+        status = start["status"] if start else 500
+        headers = list(start["headers"]) if start else []
+        body = b"".join(chunks)
+        hd = {k.lower(): v for k, v in headers}
+        ctype = hd.get(b"content-type", b"").decode("latin-1").lower()
+        encoded = b"content-encoding" in hd
+
+        if path == "/health":
+            if err is not None or start is None or status >= 500:
+                note = (repr(err) if err is not None else "health_handler_status_%s" % status)[:240]
+                print("[patch_live_fix] /health failed -> fallback:", note)
+                out = {"status": "degraded", "version": str(self.version), "ts": int(time.time()),
+                       "loader": "main", "health_error": note}
+                return await _send(send, 200, [(b"cache-control", b"no-store")],
+                                   json.dumps(out).encode(), b"application/json")
+            if "json" in ctype and not encoded:
+                try:
                     data = json.loads(body.decode("utf-8", "ignore"))
                     if isinstance(data, dict):
                         data.setdefault("loader", "main")
-                    headers = {k: v for k, v in resp.headers.items()
-                               if k.lower() not in ("content-length", "content-type")}
-                    return JSONResponse(data, status_code=resp.status_code, headers=headers)
-            except Exception:
-                pass
-            return resp
+                        body = json.dumps(data).encode()
+                except Exception:
+                    pass
+        else:  # "/"
+            if err is not None and start is None:
+                raise err
+            if status == 200 and "text/html" in ctype and not encoded:
+                text = body.decode("utf-8", "ignore")
+                patched = _patch_html(text)
+                if patched != text:
+                    body = patched.encode("utf-8")
 
-    app.add_middleware(HealthGuard)
-    print("[patch_live_fix] /health guard on (existing /health kept)")
+        keep = [(k, v) for k, v in headers if k.lower() not in (b"content-length",)]
+        await send({"type": "http.response.start", "status": status,
+                    "headers": keep + [(b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
 
 
-def _install_home_middleware(g: dict) -> None:
-    app = g.get("app")
-    if app is None:
-        return
-    from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.responses import Response
-
-    class DemoToLiveMiddleware(BaseHTTPMiddleware):
-        async def dispatch(self, request, call_next):
-            resp = await call_next(request)
-            if request.url.path not in ("/", ""):
-                return resp
-            if "text/html" not in (resp.headers.get("content-type") or ""):
-                return resp
-            body = b""
-            async for chunk in resp.body_iterator:
-                body += chunk
-            text = body.decode("utf-8", "ignore")
-            patched = _patch_html(text)
-            if patched == text:
-                return Response(content=body, status_code=resp.status_code,
-                                headers={k: v for k, v in resp.headers.items() if k.lower() != "content-length"})
-            headers = {k: v for k, v in resp.headers.items() if k.lower() not in ("content-length", "content-encoding")}
-            return Response(content=patched.encode("utf-8"), status_code=resp.status_code,
-                            headers=headers, media_type="text/html")
-
-    app.add_middleware(DemoToLiveMiddleware)
-    html = g.get("HOME_HTML")
-    if isinstance(html, str) and html:
-        g["HOME_HTML"] = _patch_html(html)
-    print("[patch_live_fix] homepage check() forced LIVE")
+async def _send(send, status, headers, body, ctype):
+    await send({"type": "http.response.start", "status": status,
+                "headers": list(headers) + [(b"content-type", ctype), (b"content-length", str(len(body)).encode())]})
+    await send({"type": "http.response.body", "body": body})
 
 
 def apply(g: dict) -> None:
     if not isinstance(g, dict):
         raise TypeError("apply expects shared globals dict")
     _ensure_omni(g)
-    _install_health_guard(g)
-    _install_home_middleware(g)
-    print("[patch_live_fix] applied")
+    html = g.get("HOME_HTML")
+    if isinstance(html, str) and html:
+        g["HOME_HTML"] = _patch_html(html)
+    app = g.get("app")
+    if app is not None and not isinstance(app, LiveFixASGI):
+        version = g.get("VERSION") or getattr(app, "version", None) or "live-fix"
+        g["app"] = LiveFixASGI(app, version)  # main.py exports this wrapped app
+    print("[patch_live_fix] applied (ASGI wrapper on / and /health)")
