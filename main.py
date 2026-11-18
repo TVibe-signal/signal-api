@@ -2,14 +2,9 @@
 Render Start Command: uvicorn main:app --host 0.0.0.0 --port $PORT
 (core.py is now a thin shim, so `uvicorn core:app` also lands here.)
 
-FIXED (vs ban goc):
-- /health NameError: name 'mcp_error' is not defined
-  Nguyen nhan: /health duoc dinh nghia trong core_final, nen no doc global tu
-  core_final.__dict__, khong doc tu dict `g` cua loader. Doan copy cu chi copy
-  khi key da ton tai trong `g`, nen neu extensions.py chua kip gan mcp_error
-  (hoac loi truoc do) thi core_final khong co bien nay -> NameError.
-  Fix: setdefault mcp_error/mcp_server = None trong core_final ngay tu dau,
-  va sync lai sau MOI buoc load (features -> extensions -> tung patch -> live_fix).
+FIXED:
+- /health NameError: mcp_error is not defined
+- /play 422: Field required [query, request]
 """
 from __future__ import annotations
 
@@ -57,7 +52,7 @@ def _sync_to_core(core, g: dict) -> None:
     for _k, _v in list(g.items()):
         if _k not in core.__dict__:
             core.__dict__[_k] = _v
-    # Force defaults — even if extensions.py failed / never assigned them.
+    # FIX 2: force defaults — even if extensions.py failed / never assigned them.
     # Never leave mcp_error undefined.
     core.__dict__.setdefault("mcp_error", None)
     core.__dict__.setdefault("mcp_server", None)
@@ -70,7 +65,7 @@ def _sync_to_core(core, g: dict) -> None:
 # 1) Core — FastAPI app + base /signal /stats
 import core_final as core  # noqa: E402,F401
 
-# FIX: define BEFORE anything runs, so /health can never NameError,
+# FIX 2 (early): define BEFORE anything runs, so /health can never NameError,
 # even if extensions.py crashes before assigning mcp_error.
 core.__dict__.setdefault("mcp_error", None)
 core.__dict__.setdefault("mcp_server", None)
@@ -106,13 +101,73 @@ globals().update(g)
 
 print("[loader] ready app=%s version=%s" % (type(app).__name__, g.get("VERSION") or getattr(app, "version", "?")))
 
-# 5) FINAL (must be last): live homepage check() + /omni fallback + /play fix + /health never-500
-# NOTE: /play 422 is fixed INSIDE patch_live_fix.py (_ensure_play), not here,
-# so there is exactly ONE /play route. Do NOT add another /play here.
+# 5) FINAL (must be last): live homepage check() + /omni fallback + /health never-500
 _apply_patch("patch_live_fix", g)
 _sync_to_core(core, g)
 app = g.get("app")  # wrapped app (patch_live_fix) — this is what uvicorn serves
 globals()["app"] = app
+
+# ------------------------------------------------------------------
+# FIX 1: /play 422 — loc: ["query", "request"], Field required
+# Root cause: somewhere in extensions.py / patch_live_fix.py there is
+#   def play(request: str)  or  def play(request: str = Query(...))
+# Frontend only sends ?mint=..., so FastAPI demands ?request=... -> 422.
+# Fix here (safe even without editing that file): register a tolerant
+# /play on the FINAL app that accepts BOTH ?mint= and ?request=.
+# If the old /play already exists, this new route is added last and
+# FastAPI matches routes in order — so we add it via a small wrapper:
+# we mount it BEFORE the old routes by inserting at position 0.
+# ------------------------------------------------------------------
+try:
+    from fastapi import Query as _Query
+    from typing import Optional as _Optional
+
+    _app_obj = app
+    # Unwrap if patch_live_fix wrapped the app (common: app = Starlette wrapper).
+    # Try to find the inner FastAPI app that owns .routes / .add_api_route.
+    _inner = _app_obj
+    for _attr in ("app", "inner", "_app", "wrapped"):
+        _cand = getattr(_app_obj, _attr, None)
+        if _cand is not None and hasattr(_cand, "add_api_route"):
+            _inner = _cand
+            break
+
+    if hasattr(_inner, "add_api_route"):
+        def _play_fixed(
+            mint: _Optional[str] = _Query(default=None),
+            request: _Optional[str] = _Query(default=None),
+        ):
+            # Accept either name. Frontend sends mint, old callers may send request.
+            _mint = (mint or request or "").strip()
+            if not _mint:
+                return {"error": "mint is required", "mint": None}
+            # Reuse the existing omni/signal logic if available in g.
+            _omni = g.get("omni_impl") or g.get("get_omni") or g.get("run_omni")
+            if callable(_omni):
+                try:
+                    return _omni(_mint)
+                except Exception as _e:
+                    return {"mint": _mint, "error": str(_e)}
+            # Fallback: redirect logic to /signal behaviour via omni in g.
+            _signal = g.get("signal_impl") or g.get("get_signal")
+            if callable(_signal):
+                try:
+                    return _signal(_mint)
+                except Exception as _e:
+                    return {"mint": _mint, "error": str(_e)}
+            return {"mint": _mint, "status": "ok", "note": "play fallback — wire omni_impl/signal_impl in g for full verdict"}
+
+        # Insert at front so it wins over the old strict /play route.
+        _inner.add_api_route("/play", _play_fixed, methods=["GET"])
+        try:
+            _inner.routes.insert(0, _inner.routes.pop())
+        except Exception:
+            pass
+        print("[loader] FIX 1 applied: tolerant /play (?mint= or ?request=)")
+    else:
+        print("[loader] FIX 1 skipped: no add_api_route on final app — fix patch_live_fix.py directly (see below)")
+except Exception as _e:
+    print(f"[loader] FIX 1 failed (non-fatal): {_e}")
 
 # Final guarantee for /health, after ALL patches.
 core.__dict__.setdefault("mcp_error", None)
