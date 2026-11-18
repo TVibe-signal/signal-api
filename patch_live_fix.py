@@ -1,4 +1,4 @@
-"""patch_live_fix.py — MINI v6 (paste-safe, ~150 lines).
+"""patch_live_fix.py — MINI v7 (paste-safe, ~150 lines).
 Replace ENTIRE content of patch_live_fix.py on GitHub with this file.
 Fixes vs v4-mini:
 - v4 only rewrote ?request= (killed the 422) but NEVER touched /omni.
@@ -54,12 +54,17 @@ def _register(g):
              or request.query_params.get("request") or "").strip()
         if not MINT_RE.match(m):
             return {"error": "Invalid Solana token mint address", "mint": m}
-        client = getattr(request.app.state, "client", None)
-        if client is None:
+        # v7: NEVER touch request.app.state. main.py wraps the app in
+        # _MainFixASGI, which has NO .state -> AttributeError here raised
+        # BEFORE _build's try/except -> plain "Internal Server Error" 500.
+        # Always use a fresh client; it cannot raise this way.
+        try:
             import httpx
             async with httpx.AsyncClient(timeout=25.0) as client:
                 return await _build(g, client, m)
-        return await _build(g, client, m)
+        except Exception as e:
+            return {"mint": m, "error": f"upstream_or_no_pair: {e}"[:240],
+                    "action": "review", "verdict": "review", "nfa": True}
 
     @app.get("/play", tags=["product"])
     async def play_v6(request: Request, mint: str | None = Query(default=None)):
@@ -69,12 +74,17 @@ def _register(g):
             return {"error": "mint is required: /play?mint=<MINT>", "mint": None}
         if not MINT_RE.match(m):
             return {"error": "Invalid Solana token mint address", "mint": m}
-        client = getattr(request.app.state, "client", None)
-        if client is None:
+        # v7: NEVER touch request.app.state. main.py wraps the app in
+        # _MainFixASGI, which has NO .state -> AttributeError here raised
+        # BEFORE _build's try/except -> plain "Internal Server Error" 500.
+        # Always use a fresh client; it cannot raise this way.
+        try:
             import httpx
             async with httpx.AsyncClient(timeout=25.0) as client:
                 return await _build(g, client, m)
-        return await _build(g, client, m)
+        except Exception as e:
+            return {"mint": m, "error": f"upstream_or_no_pair: {e}"[:240],
+                    "action": "review", "verdict": "review", "nfa": True}
     print("[patch_live_fix] /omni + /play registered (v6, builder wrapped)")
 
 class LiveFixASGI:
@@ -85,7 +95,7 @@ class LiveFixASGI:
         return getattr(self.inner, name)
     async def __call__(self, scope, receive, send):
         if scope.get("type") == "http" and scope.get("path") == "/__main_status":
-            body = json.dumps({"main_py": "v4", "patch_live_fix": "v6-mini",
+            body = json.dumps({"main_py": "v4", "patch_live_fix": "v7-mini",
                                "fix": "omni/play builder wrapped, never 500"}).encode()
             await _send(send, 200, [(b"cache-control", b"no-store")], body, b"application/json")
             return
@@ -147,4 +157,4 @@ def apply(g: dict) -> None:
     if app is not None and not isinstance(app, LiveFixASGI):
         version = g.get("VERSION") or getattr(app, "version", None) or "live-fix"
         g["app"] = LiveFixASGI(app, version)
-    print("[patch_live_fix] applied v6-mini (ASGI wrapper + /omni /play never-500)")
+    print("[patch_live_fix] applied v7-mini (ASGI wrapper + /omni /play never-500)")
