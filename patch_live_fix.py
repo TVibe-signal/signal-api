@@ -1,15 +1,17 @@
-"""patch_live_fix.py — MINI v4 (short paste-safe version).
-Replaces the 424-line file. Phone paste truncates long files (~322 lines),
-which left a bare `if` at line 367 -> SyntaxError -> patch never loaded.
-This file is short on purpose. It keeps only what actually fixes the bug:
-- ASGI wrapper answers /__main_status directly (outermost, always runs)
-- ASGI query rewrite injects ?request=<mint> for /omni /play /signal
-  (kills the 422: Field required [query, request])
-- /health never 500s, / homepage passes through.
+"""patch_live_fix.py — MINI v6 (paste-safe, ~150 lines).
+Replace ENTIRE content of patch_live_fix.py on GitHub with this file.
+Fixes vs v4-mini:
+- v4 only rewrote ?request= (killed the 422) but NEVER touched /omni.
+  The old /omni handler still called build_omni/build_signal with NO
+  try/except -> token with no SOL pair raised -> FastAPI 500.
+- v6 registers NEW /omni + /play (old routes removed first) and wraps
+  EVERY builder call in try/except -> no-pair / upstream error becomes
+  a normal JSON answer {"error": "upstream_or_no_pair: ..."}, never 500.
 """
 from __future__ import annotations
-import json, time
+import json, re, time
 
+MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 
 async def _send(send, status, headers, body, ctype):
     await send({"type": "http.response.start", "status": status,
@@ -17,94 +19,76 @@ async def _send(send, status, headers, body, ctype):
                                             (b"content-length", str(len(body)).encode())]})
     await send({"type": "http.response.body", "body": body})
 
+async def _build(g, client, mint):
+    """Call the real builder. NEVER raise — return error JSON instead."""
+    try:
+        b = g.get("build_omni")
+        if callable(b):
+            r = await b(client, mint)
+            return r if isinstance(r, dict) else {"mint": mint, "error": "bad_packet", "nfa": True}
+        s = g.get("build_signal")
+        if callable(s):
+            r = await s(client, mint, security=True)
+            if isinstance(r, tuple) and r:
+                r = r[0]
+            return r if isinstance(r, dict) else {"mint": mint, "error": "empty", "nfa": True}
+        return {"mint": mint, "error": "no_builder", "nfa": True}
+    except Exception as e:
+        return {"mint": mint, "error": f"upstream_or_no_pair: {e}"[:240],
+                "action": "review", "verdict": "review", "nfa": True}
 
-def _ensure_omni_play(g: dict) -> None:
-    """MINI v5: (re)create /omni + /play if missing. This is what MINI v4 dropped.
-    Tolerant: accepts ?mint= AND ?request=. Delegates to build_omni/build_signal
-    from the shared globals when present, else returns a clean JSON (never 422/404)."""
+def _register(g):
     app = g.get("app")
-    if app is None:
+    if app is None or not hasattr(app, "router"):
         return
-    # MINI v6: FORCE-replace. The old /omni handler in extensions.py crashes
-    # with 500 when a token has no SOL pair, and v5 skipped registering
-    # because the path already existed — so the crashing handler kept running.
     try:
         app.router.routes[:] = [r for r in app.router.routes
                                 if getattr(r, "path", None) not in ("/omni", "/play")]
     except Exception:
         pass
-    paths = set()
     from fastapi import Query, Request
-    import re as _re
-    mint_re = g.get("MINT_RE") or _re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
-    build_omni, build_signal = g.get("build_omni"), g.get("build_signal")
 
-    async def _build(client, mint: str):
-        if callable(build_omni):
-            return await build_omni(client, mint)
-        if callable(build_signal):
-            r = await build_signal(client, mint, security=True)
-            if isinstance(r, tuple) and r:
-                r = r[0]
-            return r if isinstance(r, dict) else {"mint": mint, "error": "empty"}
-        return {"mint": mint, "error": "no_builder", "action": "skip", "nfa": True}
-
-    async def _run(request: Request, mint, request_param):
-        m = ((mint or request_param) or "").strip()
-        if not m:
-            m = (request.query_params.get("mint") or request.query_params.get("request") or "").strip()
-        if not m:
-            return {"error": "mint is required", "mint": None}
-        if not mint_re.match(m):
+    @app.get("/omni", tags=["product"])
+    async def omni_v6(request: Request, mint: str | None = Query(default=None)):
+        m = (mint or request.query_params.get("mint")
+             or request.query_params.get("request") or "").strip()
+        if not MINT_RE.match(m):
             return {"error": "Invalid Solana token mint address", "mint": m}
-        try:
-            client = getattr(request.app.state, "client", None)
-            if client is None:
-                import httpx
-                async with httpx.AsyncClient(timeout=25.0) as client:
-                    pkt = await _build(client, m)
-            else:
-                pkt = await _build(client, m)
-        except Exception as e:
-            # No-pair / upstream hiccup must be a normal JSON answer, never a 500.
-            return {"mint": m, "error": f"upstream_or_no_pair: {e}"[:240],
-                    "action": "review", "verdict": "review", "nfa": True}
-        return pkt if isinstance(pkt, dict) else {"mint": m, "error": "bad_packet", "nfa": True}
+        client = getattr(request.app.state, "client", None)
+        if client is None:
+            import httpx
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                return await _build(g, client, m)
+        return await _build(g, client, m)
 
-    if "/omni" not in paths:
-        @app.get("/omni", tags=["product"])
-        async def omni_mini(request: Request, mint: str | None = Query(default=None),
-                            request_param: str | None = Query(default=None, alias="request")):
-            return await _run(request, mint, request_param)
-        print("[patch_live_fix] /omni registered (mini v5)")
-    if "/play" not in paths:
-        try:
-            app.router.routes[:] = [r for r in app.router.routes if getattr(r, "path", None) != "/play"]
-        except Exception:
-            pass
-        @app.get("/play", tags=["product"])
-        async def play_mini(request: Request, mint: str | None = Query(default=None),
-                            request_param: str | None = Query(default=None, alias="request")):
-            return await _run(request, mint, request_param)
-        print("[patch_live_fix] /play registered (mini v5)")
-
+    @app.get("/play", tags=["product"])
+    async def play_v6(request: Request, mint: str | None = Query(default=None)):
+        m = (mint or request.query_params.get("mint")
+             or request.query_params.get("request") or "").strip()
+        if not m:
+            return {"error": "mint is required: /play?mint=<MINT>", "mint": None}
+        if not MINT_RE.match(m):
+            return {"error": "Invalid Solana token mint address", "mint": m}
+        client = getattr(request.app.state, "client", None)
+        if client is None:
+            import httpx
+            async with httpx.AsyncClient(timeout=25.0) as client:
+                return await _build(g, client, m)
+        return await _build(g, client, m)
+    print("[patch_live_fix] /omni + /play registered (v6, builder wrapped)")
 
 class LiveFixASGI:
     def __init__(self, inner, version):
         self.inner = inner
         self.version = version
-
     def __getattr__(self, name):
         return getattr(self.inner, name)
-
     async def __call__(self, scope, receive, send):
-        # 1) Probe — must be FIRST, before anything else.
         if scope.get("type") == "http" and scope.get("path") == "/__main_status":
             body = json.dumps({"main_py": "v4", "patch_live_fix": "v6-mini",
-                               "fix": "asgi __main_status in LiveFixASGI"}).encode()
+                               "fix": "omni/play builder wrapped, never 500"}).encode()
             await _send(send, 200, [(b"cache-control", b"no-store")], body, b"application/json")
             return
-        # 2) Query rewrite — kills the 422 for /omni /play /signal.
         if scope.get("type") == "http" and scope.get("method") == "GET" \
                 and scope.get("path") in ("/omni", "/play", "/signal", "/signals"):
             try:
@@ -122,20 +106,17 @@ class LiveFixASGI:
                 scope["query_string"] = urlencode(params).encode("latin-1")
             except Exception as e:
                 print(f"[patch_live_fix] query rewrite failed (non-fatal): {e}")
-        # 3) Only intercept / and /health for patching; everything else passes through.
         if (scope.get("type") != "http" or scope.get("method") != "GET"
                 or scope.get("path") not in ("/", "/health")):
             return await self.inner(scope, receive, send)
         path = scope["path"]
         start, chunks, err = None, [], None
-
         async def cap(message):
             nonlocal start
             if message["type"] == "http.response.start":
                 start = message
             elif message["type"] == "http.response.body":
                 chunks.append(message.get("body", b""))
-
         try:
             await self.inner(scope, receive, cap)
         except Exception as e:
@@ -155,16 +136,15 @@ class LiveFixASGI:
                     "headers": keep + [(b"content-length", str(len(body)).encode())]})
         await send({"type": "http.response.body", "body": body})
 
-
 def apply(g: dict) -> None:
     if not isinstance(g, dict):
         raise TypeError("apply expects shared globals dict")
     try:
-        _ensure_omni_play(g)
+        _register(g)
     except Exception as e:
-        print(f"[patch_live_fix] _ensure_omni_play FAILED (non-fatal, wrapper still installs): {e}")
+        print(f"[patch_live_fix] _register FAILED (non-fatal): {e}")
     app = g.get("app")
     if app is not None and not isinstance(app, LiveFixASGI):
         version = g.get("VERSION") or getattr(app, "version", None) or "live-fix"
         g["app"] = LiveFixASGI(app, version)
-    print("[patch_live_fix] applied v6-mini (ASGI wrapper on /, /health, /__main_status)")
+    print("[patch_live_fix] applied v6-mini (ASGI wrapper + /omni /play never-500)")
