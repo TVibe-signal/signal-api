@@ -1,6 +1,15 @@
 """main.py — TVibe FILTER loader (THIS file is what Render runs). Order matters.
 Render Start Command: uvicorn main:app --host 0.0.0.0 --port $PORT
 (core.py is now a thin shim, so `uvicorn core:app` also lands here.)
+
+FIXED (vs ban goc):
+- /health NameError: name 'mcp_error' is not defined
+  Nguyen nhan: /health duoc dinh nghia trong core_final, nen no doc global tu
+  core_final.__dict__, khong doc tu dict `g` cua loader. Doan copy cu chi copy
+  khi key da ton tai trong `g`, nen neu extensions.py chua kip gan mcp_error
+  (hoac loi truoc do) thi core_final khong co bien nay -> NameError.
+  Fix: setdefault mcp_error/mcp_server = None trong core_final ngay tu dau,
+  va sync lai sau MOI buoc load (features -> extensions -> tung patch -> live_fix).
 """
 from __future__ import annotations
 
@@ -39,32 +48,54 @@ def _apply_patch(modname: str, g: dict) -> None:
         print(f"[loader] {modname} NOT applied: {e}")
 
 
+def _sync_to_core(core, g: dict) -> None:
+    """Copy names created by extensions/patches back into core_final's module globals.
+
+    /health is DEFINED in core_final, so it looks up globals in core_final.__dict__,
+    NOT in the loader dict `g`. If a name only exists in `g`, /health raises NameError.
+    """
+    for _k, _v in list(g.items()):
+        if _k not in core.__dict__:
+            core.__dict__[_k] = _v
+    # Force defaults — even if extensions.py failed / never assigned them.
+    # Never leave mcp_error undefined.
+    core.__dict__.setdefault("mcp_error", None)
+    core.__dict__.setdefault("mcp_server", None)
+    # If extensions DID define it, take the real value (overrides the default).
+    for _k in ("mcp_server", "mcp_error"):
+        if _k in g:
+            core.__dict__[_k] = g[_k]
+
+
 # 1) Core — FastAPI app + base /signal /stats
 import core_final as core  # noqa: E402,F401
+
+# FIX: define BEFORE anything runs, so /health can never NameError,
+# even if extensions.py crashes before assigning mcp_error.
+core.__dict__.setdefault("mcp_error", None)
+core.__dict__.setdefault("mcp_server", None)
 
 g = dict(vars(core))
 g["__name__"] = "__main__"
 g["__file__"] = os.path.join(ROOT, "main.py")
+# Also seed the shared dict, so exec'd files see the defaults.
+g.setdefault("mcp_error", None)
+g.setdefault("mcp_server", None)
 
 # 2) features.py — heuristics layers (shared namespace)
 _exec_module_file(os.path.join(ROOT, "features.py"), g, "features")
+_sync_to_core(core, g)
 
 # 3) extensions.py — MCP, /omni, ops, SI (must be after core/features)
 _exec_module_file(os.path.join(ROOT, "extensions.py"), g, "extensions")
 
-# 3b) core_final's own routes (/health, /stats ...) read core_final's module globals, but
-#     extensions.py runs in the shared dict `g`. Copy the names it created (mcp_error, ...)
-#     back, otherwise /health raises NameError: name 'mcp_error' is not defined.
-for _k, _v in list(g.items()):
-    if _k not in core.__dict__:
-        core.__dict__[_k] = _v
-for _k in ("mcp_server", "mcp_error"):
-    if _k in g:
-        core.__dict__[_k] = g[_k]
+# 3b) Sync back to core_final (see _sync_to_core docstring).
+_sync_to_core(core, g)
 
 # 4) Optional patches, in order
 for _name in ("patch_stats_fix", "patch_p0", "patch_filter_v4", "patch_usdc_pair_v2"):
     _apply_patch(_name, g)
+    _sync_to_core(core, g)
 
 app = g.get("app")
 if app is None:
@@ -75,7 +106,16 @@ globals().update(g)
 
 print("[loader] ready app=%s version=%s" % (type(app).__name__, g.get("VERSION") or getattr(app, "version", "?")))
 
-# 5) FINAL (must be last): live homepage check() + /omni fallback + /health never-500
+# 5) FINAL (must be last): live homepage check() + /omni fallback + /play fix + /health never-500
+# NOTE: /play 422 is fixed INSIDE patch_live_fix.py (_ensure_play), not here,
+# so there is exactly ONE /play route. Do NOT add another /play here.
 _apply_patch("patch_live_fix", g)
+_sync_to_core(core, g)
 app = g.get("app")  # wrapped app (patch_live_fix) — this is what uvicorn serves
 globals()["app"] = app
+
+# Final guarantee for /health, after ALL patches.
+core.__dict__.setdefault("mcp_error", None)
+core.__dict__.setdefault("mcp_server", None)
+g.setdefault("mcp_error", core.__dict__["mcp_error"])
+g.setdefault("mcp_server", core.__dict__["mcp_server"])
