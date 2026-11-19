@@ -406,4 +406,4 @@ class LiveFixASGI:
                 out = {"status": "degraded", "version": str(self.version), "ts": int(time.time()),
                        "loader": "main", "health_error": note}
                 return await _send(send, 200, [(b"cache-control", b"no-store")],
- 
+                   json.dumps(out).encode(), b"application/json")
