@@ -407,3 +407,42 @@ class LiveFixASGI:
                        "loader": "main", "health_error": note}
                 return await _send(send, 200, [(b"cache-control", b"no-store")],
                    json.dumps(out).encode(), b"application/json")
+            if "json" in ctype and not encoded:
+                try:
+                    data = json.loads(body.decode("utf-8", "ignore"))
+                    if isinstance(data, dict):
+                        data.setdefault("loader", "main")
+                        body = json.dumps(data).encode()
+                except Exception:
+                    pass
+        else:
+            if err is not None and start is None:
+                raise err
+            if status == 200 and "text/html" in ctype and not encoded:
+                text = body.decode("utf-8", "ignore")
+                patched = _patch_html(text)
+                if patched != text:
+                    body = patched.encode("utf-8")
+        keep = [(k, v) for k, v in headers if k.lower() not in (b"content-length",)]
+        await send({"type": "http.response.start", "status": status,
+                    "headers": keep + [(b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
+async def _send(send, status, headers, body, ctype):
+    await send({"type": "http.response.start", "status": status,
+                "headers": list(headers) + [(b"content-type", ctype), (b"content-length", str(len(body)).encode())]})
+    await send({"type": "http.response.body", "body": body})
+
+def apply(g: dict) -> None:
+    if not isinstance(g, dict):
+        raise TypeError("apply expects shared globals dict")
+    _ensure_omni(g)
+    _ensure_play(g)
+    html = g.get("HOME_HTML")
+    if isinstance(html, str) and html:
+        g["HOME_HTML"] = _patch_html(html)
+    app = g.get("app")
+    if app is not None and not isinstance(app, LiveFixASGI):
+        version = g.get("VERSION") or getattr(app, "version", None) or "live-fix"
+        g["app"] = LiveFixASGI(app, version)
+    print("[patch_live_fix] applied v24 (ASGI wrapper on / and /health, SOL hero + quick buttons removed, big token check)")
