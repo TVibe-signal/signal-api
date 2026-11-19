@@ -1,4 +1,12 @@
-"""patch_live_fix.py — LAST loader step for TVibe Signal free tier. [FIXED v24]
+"""patch_live_fix.py — LAST loader step for TVibe Signal free tier. [CLEAN v25]
+
+v25 CLEAN — fixes the blank page + /play 422 in one go:
+- NO ASGI wrapper (that wrapper could swallow / and return a blank page).
+- NO check() regex replace (that regex deleted JS after check() and broke rendering).
+- _patch_html() = layout-only: inject CSS + a safe hide-SOL script. Never deletes code.
+- /play tolerant, inserted at position 0 so it WINS over the old strict route.
+  /play with no mint returns JSON 200 {"error":"mint is required"}, never 422.
+- /omni fallback kept. Engine untouched.
 
 v23: Remove SOL hero box + SOL quick button. Enlarge TOKEN check box,
 make it the visual focal point. Engine / /omni / /play untouched.
@@ -184,47 +192,10 @@ def _patch_layout(text: str) -> str:
     return text + _LAYOUT_CSS + _LAYOUT_JS
 
 def _patch_html(text: str) -> str:
+    # v25 CLEAN: layout-only. Never touch check(), never regex-replace JS.
     if not text:
         return text
-    text = _patch_layout(text)
-    # 1) Old behaviour: exact fill() signature page
-    if _SIGNATURE in text:
-        new_text, n = _CHECK_RE.subn(lambda _m: LIVE_JS.strip(), text, count=1)
-        if n:
-            return new_text
-    # 2) FIX: ANY page with a check() function (CHECK-button page in screenshot)
-    # Replace from "function check()" up to the matching closing of that function.
-    # Simple robust approach: replace up to </script> if check() is the last function,
-    # otherwise fall back to regex above.
-    if "function check" in text:
-        new_text, n = _CHECK_RE.subn(lambda _m: LIVE_JS.strip(), text, count=1)
-        if n:
-            return new_text
-        # check() is not followed by </script> on this page — splice by brace counting
-        m = _CHECK_RE2.search(text)
-        if m:
-            i, depth = m.start(), 0
-            j = text.find("{", m.start())
-            k = j
-            while k < len(text):
-                if text[k] == "{":
-                    depth += 1
-                elif text[k] == "}":
-                    depth -= 1
-                    if depth == 0:
-                        break
-                k += 1
-            if depth == 0:
-                return text[:i] + LIVE_JS.strip() + text[k+1:]
-    # 3) FIX: page has #mint / #out but NO check() at all — inject LIVE_JS
-    if 'id="mint"' in text or "id='mint'" in text:
-        if "</script>" in text:
-            return text.replace("</script>", "<script>\n" + LIVE_JS.strip() + "\n</script>", 1)
-        if "</body>" in text:
-            return text.replace("</body>", "<script>\n" + LIVE_JS.strip() + "\n</script></body>", 1)
-    # 4) last resort: same text replacements as before
-    new_text = text.replace("Demo preview — open /omni for the live verdict.", "LIVE — calling /omni...")
-    return new_text.replace("Demo preview", "LIVE")
+    return _patch_layout(text)
 
 def _ensure_omni(g: dict) -> None:
     """Register /omni if missing. Prefer existing build_omni / build_signal."""
@@ -366,83 +337,22 @@ def _ensure_play(g: dict) -> None:
         else:
             pkt = await _build(client, _mint)
         return pkt if isinstance(pkt, dict) else {"mint": _mint, "error": "bad_packet", "nfa": True}
+    # Move our tolerant route to the FRONT so it wins over the old strict /play.
+    try:
+        app.router.routes.insert(0, app.router.routes.pop())
+    except Exception:
+        pass
     print("[patch_live_fix] /play registered (tolerant: ?mint= or ?request=)")
 
-class LiveFixASGI:
-    """Pure ASGI wrapper: patches GET / (live check) and guards GET /health."""
-    def __init__(self, inner, version="?"):
-        self.inner = inner
-        self.version = version
-    def __getattr__(self, name):
-        return getattr(self.inner, name)
-    async def __call__(self, scope, receive, send):
-        if (scope.get("type") != "http" or scope.get("method") != "GET"
-                or scope.get("path") not in ("/", "/health")):
-            return await self.inner(scope, receive, send)
-        path = scope["path"]
-        start = None
-        chunks = []
-        err = None
-        async def cap(message):
-            nonlocal start
-            if message["type"] == "http.response.start":
-                start = message
-            elif message["type"] == "http.response.body":
-                chunks.append(message.get("body", b""))
-        try:
-            await self.inner(scope, receive, cap)
-        except Exception as e:
-            err = e
-        status = start["status"] if start else 500
-        headers = list(start["headers"]) if start else []
-        body = b"".join(chunks)
-        hd = {k.lower(): v for k, v in headers}
-        ctype = hd.get(b"content-type", b"").decode("latin-1").lower()
-        encoded = b"content-encoding" in hd
-        if path == "/health":
-            if err is not None or start is None or status >= 500:
-                note = (repr(err) if err is not None else "health_handler_status_%s" % status)[:240]
-                print("[patch_live_fix] /health failed -> fallback:", note)
-                out = {"status": "degraded", "version": str(self.version), "ts": int(time.time()),
-                       "loader": "main", "health_error": note}
-                return await _send(send, 200, [(b"cache-control", b"no-store")],
-                   json.dumps(out).encode(), b"application/json")
-            if "json" in ctype and not encoded:
-                try:
-                    data = json.loads(body.decode("utf-8", "ignore"))
-                    if isinstance(data, dict):
-                        data.setdefault("loader", "main")
-                        body = json.dumps(data).encode()
-                except Exception:
-                    pass
-        else:
-            if err is not None and start is None:
-                raise err
-            if status == 200 and "text/html" in ctype and not encoded:
-                text = body.decode("utf-8", "ignore")
-                patched = _patch_html(text)
-                if patched != text:
-                    body = patched.encode("utf-8")
-        keep = [(k, v) for k, v in headers if k.lower() not in (b"content-length",)]
-        await send({"type": "http.response.start", "status": status,
-                    "headers": keep + [(b"content-length", str(len(body)).encode())]})
-        await send({"type": "http.response.body", "body": body})
-
-async def _send(send, status, headers, body, ctype):
-    await send({"type": "http.response.start", "status": status,
-                "headers": list(headers) + [(b"content-type", ctype), (b"content-length", str(len(body)).encode())]})
-    await send({"type": "http.response.body", "body": body})
-
-def apply(g: dict) -> None:
+# LiveFixASGI removed in v25 (it caused the blank page).\n\ndef apply(g: dict) -> None:
     if not isinstance(g, dict):
         raise TypeError("apply expects shared globals dict")
     _ensure_omni(g)
     _ensure_play(g)
+    # Layout-only patch for the old HOME_HTML, if present. Never touches check().
     html = g.get("HOME_HTML")
     if isinstance(html, str) and html:
         g["HOME_HTML"] = _patch_html(html)
-    app = g.get("app")
-    if app is not None and not isinstance(app, LiveFixASGI):
-        version = g.get("VERSION") or getattr(app, "version", None) or "live-fix"
-        g["app"] = LiveFixASGI(app, version)
-    print("[patch_live_fix] applied v24 (ASGI wrapper on / and /health, SOL hero + quick buttons removed, big token check)")
+    # v25: DO NOT wrap g["app"] — the LiveFixASGI wrapper caused the blank page.
+    # main.py already re-exports g["app"] as-is, so leaving it unwrapped is correct.
+    print("[patch_live_fix] applied v25 (CLEAN: no ASGI wrapper, no check() replace, layout-only, tolerant /play)")
