@@ -339,8 +339,13 @@ async function check() {
     const r = await fetch('/omni?mint=' + encodeURIComponent(m), { cache: 'no-store' });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) {
-      out.innerHTML = '<div class="err">Error ' + r.status + ' — ' +
-        esc(d.detail || d.error || 'upstream issue') + '</div>';
+      let msg = d.error || d.detail || 'upstream issue';
+      if (Array.isArray(msg)) {
+        msg = msg.map(x => (x && x.msg) ? x.msg : JSON.stringify(x)).join('; ');
+      } else if (typeof msg === 'object') {
+        msg = JSON.stringify(msg);
+      }
+      out.innerHTML = '<div class="err">Error ' + r.status + ' — ' + esc(msg) + '</div>';
       return;
     }
     const dec = d.decision || {};
@@ -380,14 +385,17 @@ $('mint').addEventListener('keydown', e => {
 
 
 def _drop(app, path: str) -> None:
-    """Aggressively remove every route matching the path."""
+    """Aggressively remove every route matching matching the path."""
     try:
-        app.router.routes[:] = [
-            r for r in app.router.routes
-            if getattr(r, "path", None) != path
-        ]
-    except Exception:
-        pass
+        keep = []
+        for r in list(app.router.routes):
+            p = getattr(r, "path", None)
+            if p == path or p == path + "/" or (p and p.rstrip("/") == path.rstrip("/")):
+                continue
+            keep.append(r)
+        app.router.routes[:] = keep
+    except Exception as e:
+        print(f"[patch_live_fix] _drop {path} warn: {e}")
 
 
 def _omni_handler(g):
@@ -512,16 +520,14 @@ def apply(g: dict) -> None:
     # 2. Stable /omni + /play — no Query() validation, read raw query_params
     for path in ("/omni", "/play"):
         _drop(app, path)
-        # also try removing any residual routes that might still match
+        app.add_api_route(path, _omni_handler(g), methods=["GET"], tags=["product"])
+        # Force the new route to the FRONT so it wins over any residual old route
         try:
-            app.router.routes[:] = [
-                r for r in app.router.routes
-                if not (getattr(r, "path", None) == path)
-            ]
+            if app.router.routes and getattr(app.router.routes[-1], "path", None) == path:
+                app.router.routes.insert(0, app.router.routes.pop())
         except Exception:
             pass
-        app.add_api_route(path, _omni_handler(g), methods=["GET"], tags=["product"])
-    print("[patch_live_fix] /omni + /play replaced (v34.1 — no 422)")
+    print("[patch_live_fix] /omni + /play replaced (v34.2 — force front)")
 
     # 3. Status + agent helpers
     _drop(app, "/__main_status")
@@ -529,7 +535,7 @@ def apply(g: dict) -> None:
     async def main_status():
         return {
             "main_py": "loader",
-            "patch_live_fix": "v34.1-no422",
+            "patch_live_fix": "v34.2-forcefront",
             "homepage": "premium",
             "wrapper": "none",
         }
@@ -539,7 +545,7 @@ def apply(g: dict) -> None:
     async def agent_json():
         return {
             "name": "TVibe Signal",
-            "version": "v34.1-no422",
+            "version": "v34.2-forcefront",
             "endpoints": {
                 "check": "GET /omni?mint=<MINT>",
                 "agent": "GET /omni?mint=<MINT>&view=agent",
@@ -548,4 +554,4 @@ def apply(g: dict) -> None:
             "nfa": True,
         }
 
-    print("[patch_live_fix] applied v34.1-no422")
+    print("[patch_live_fix] applied v34.2-forcefront")
