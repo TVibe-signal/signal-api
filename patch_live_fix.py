@@ -1,4 +1,4 @@
-"""patch_live_fix v31-mini — NO WRAPPER. Blank-proof."""
+"""patch_live_fix v32-mini — NO WRAPPER. Blank-proof."""
 import json,re
 MINT_RE=re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
 LIVE_JS=r"""
@@ -22,8 +22,8 @@ async function check(){
  }catch(e){out.innerHTML='<b style="color:#FF4D8D">Network error — try again.</b>';}
 }
 """
-CSS="""<style id="tv31">#mint{font-size:22px!important;padding:18px 20px!important;min-height:64px!important;width:100%!important;box-sizing:border-box!important;border:2px solid #00F0FF!important;border-radius:14px!important;background:#0B0B14!important;color:#fff!important}</style>"""
-JS="""<script id="tv31-js">(function(){function h(){try{
+CSS="""<style id="tv32">#mint{font-size:22px!important;padding:18px 20px!important;min-height:64px!important;width:100%!important;box-sizing:border-box!important;border:2px solid #00F0FF!important;border-radius:14px!important;background:#0B0B14!important;color:#fff!important}</style>"""
+JS="""<script id="tv32-js">(function(){function h(){try{
  var a=document.querySelectorAll('div,section,article,li');
  for(var i=0;i<a.length;i++){var t=(a[i].innerText||'').replace(/\\s+/g,' ');if(!t)continue;
   if((t.includes('SOL')&&t.includes('Risk 0/100'))||(t.includes('SOL')&&t.includes('Mint revoked'))){var n=a[i];for(var d=0;d<4&&n.parentElement;d++){var p=n.parentElement;if(p.innerText.length>t.length*2)break;n=p;}n.style.display='none';break;}}
@@ -32,7 +32,7 @@ JS="""<script id="tv31-js">(function(){function h(){try{
  var inp=document.getElementById('mint');if(inp&&(inp.value||'').trim().startsWith('So111')){inp.value='';inp.placeholder='Paste a token mint...';}
 }catch(e){}}if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',h);else h();var k=0;var iv=setInterval(function(){h();if(++k>6)clearInterval(iv);},500);})();</script>"""
 def _html(t):
- if not t or "tv31" in t: return t
+ if not t or "tv32" in t: return t
  o=t
  if "</head>" in o:o=o.replace("</head>",CSS+"</head>",1)
  if "</body>" in o:o=o.replace("</body>",JS+"</body>",1)
@@ -86,20 +86,20 @@ def _omni_play(g,path):
   if not isinstance(pkt,dict):pkt={"mint":m,"error":"bad_packet","nfa":True}
   if (view or "").lower() in ("agent","compact","action"):return _agent_pkt(g,pkt)
   return pkt
- print(f"[patch_live_fix] {path} replaced (v31-mini)")
+ print(f"[patch_live_fix] {path} replaced (v32-mini)")
 def _agent(g):
  app=g.get("app")
  if app is None:return
  try:app.router.routes[:]=[r for r in app.router.routes if getattr(r,"path",None) not in ("/agent.json","/agent","/__main_status")]
  except Exception:pass
  @app.get("/agent.json",tags=["product"])
- async def aj():return {"name":"TVibe Signal","version":"v31-mini","endpoints":{"check":"GET /omni?mint=<MINT>","compact":"GET /omni?mint=<MINT>&view=agent","play":"GET /play?mint=<MINT>"},"verdicts":["PASS","REVIEW","CAUTION","AVOID","SKIP"],"rules":["Always call /omni. Never guess.","Error + no verdict = could-not-score, never PASS."],"nfa":True}
+ async def aj():return {"name":"TVibe Signal","version":"v32-mini","endpoints":{"check":"GET /omni?mint=<MINT>","compact":"GET /omni?mint=<MINT>&view=agent","play":"GET /play?mint=<MINT>"},"verdicts":["PASS","REVIEW","CAUTION","AVOID","SKIP"],"rules":["Always call /omni. Never guess.","Error + no verdict = could-not-score, never PASS."],"nfa":True}
  from fastapi.responses import PlainTextResponse
  @app.get("/agent",tags=["product"],response_class=PlainTextResponse)
  async def ag():return "# TVibe Signal\nCheck: GET /omni?mint=<MINT>\nCompact: GET /omni?mint=<MINT>&view=agent\nVerdicts: PASS / REVIEW / CAUTION / AVOID / SKIP\nNever guess. Error + no verdict = could-not-score, never PASS.\nNot financial advice.\n"
  @app.get("/__main_status",tags=["product"])
- async def st():return {"main_py":"loader","patch_live_fix":"v31-mini","engine":"deep-via-patch_builder-if-loaded","wrapper":"none"}
- print("[patch_live_fix] /agent + /agent.json + /__main_status (v31-mini)")
+ async def st():return {"main_py":"loader","patch_live_fix":"v32-mini","engine":"deep-via-patch_builder-if-loaded","wrapper":"none"}
+ print("[patch_live_fix] /agent + /agent.json + /__main_status (v32-mini)")
 def _home(g):
  # NO WRAPPER: patch HOME_HTML in g + replace "/" route so it returns patched HTML.
  # If original "/" handler exists, wrap it in plain FastAPI code (no ASGI capture).
@@ -113,19 +113,23 @@ def _home(g):
   ep=old[0].endpoint
   app.router.routes[:]=[r for r in app.router.routes if getattr(r,"path",None)!="/"]
   from fastapi.responses import HTMLResponse
+  from fastapi import Request as _Req
   @app.get("/",tags=["product"])
-  async def _home2(request):
-   r=await ep(request) if str(getattr(ep,"__code__","")).find("request")>=0 else await ep()
+  async def _home2(request: _Req):
+   try:r=await ep(request)
+   except TypeError:
+    try:r=await ep()
+    except TypeError:r=await ep(request)
    b=getattr(r,"body",b"")
    try:
     t=b.decode("utf-8","ignore") if isinstance(b,(bytes,bytearray)) else str(b)
     p=_html(t)
     return HTMLResponse(content=p,status_code=getattr(r,"status_code",200))
    except Exception:return r
-  print("[patch_live_fix] / replaced (v31-mini, no wrapper)")
+  print("[patch_live_fix] / replaced (v32-mini, no wrapper)")
  except Exception as e:print(f"[patch_live_fix] / replace skipped (non-fatal): {e}")
 def apply(g):
  if not isinstance(g,dict):raise TypeError("apply expects dict")
  _omni_play(g,"/omni");_omni_play(g,"/play");_agent(g);_home(g)
  # IMPORTANT: do NOT wrap app. main.py FIX 1 unwraps app anyway, wrapper was the blank-page cause.
- print("[patch_live_fix] applied v31-mini (NO WRAPPER)")
+ print("[patch_live_fix] applied v32-mini (NO WRAPPER, / fixed: request: Request)")
