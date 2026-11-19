@@ -1,4 +1,4 @@
-"""patch_live_fix.py — LAST loader step for TVibe Signal free tier. [CLEAN v25]
+"""patch_live_fix.py — LAST loader step for TVibe Signal free tier. [CLEAN v26]
 
 v25 CLEAN — fixes the blank page + /play 422 in one go:
 - NO ASGI wrapper (that wrapper could swallow / and return a blank page).
@@ -7,6 +7,15 @@ v25 CLEAN — fixes the blank page + /play 422 in one go:
 - /play tolerant, inserted at position 0 so it WINS over the old strict route.
   /play with no mint returns JSON 200 {"error":"mint is required"}, never 422.
 - /omni fallback kept. Engine untouched.
+v26: v25 removed the wrapper -> blank fixed, BUT the layout patch stopped
+reaching the real landing page (/), because / is NOT HOME_HTML.
+So SOL hero + 3 quick buttons came back (screenshot 19:25).
+Fix: bring back a MINIMAL, FAIL-OPEN wrapper that ONLY injects the
+layout CSS+JS into GET / . No check() replace, no JS regex, and on ANY
+error it returns the ORIGINAL body untouched — so it can never blank again.
+Also: clear the pre-filled SOL mint from the input box. That pre-fill is why
+CHECK instantly shows 404: SOL has no DexScreener pair, 404 is CORRECT for SOL.
+Empty input + placeholder instead, so users paste a real token.
 
 v23: Remove SOL hero box + SOL quick button. Enlarge TOKEN check box,
 make it the visual focal point. Engine / /omni / /play untouched.
@@ -171,6 +180,15 @@ _LAYOUT_JS = """
           break;
         }
       }
+    // 4) Clear pre-filled SOL mint: SOL has no DexScreener pair, so a
+      // pre-filled SOL always shows a confusing 404 on CHECK.
+      try{
+        var inp=document.getElementById('mint');
+        if(inp && (inp.value||'').indexOf('So11111111111111111111111111111111111111112')===0){
+          inp.value='';
+          inp.placeholder='Paste a token mint...';
+        }
+      }catch(e2){}
     }catch(e){}
   }
   if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',hideSol);}
@@ -344,7 +362,53 @@ def _ensure_play(g: dict) -> None:
         pass
     print("[patch_live_fix] /play registered (tolerant: ?mint= or ?request=)")
 
-# LiveFixASGI removed in v25 (it caused the blank page).\n\ndef apply(g: dict) -> None:
+# LiveFixASGI removed in v25 (it caused the blank page).\n\nclass _SafeLayoutASGI:
+    """v26: MINIMAL wrapper. Only GET / , only HTML, only layout injection.
+
+    Fail-open: any exception -> return the ORIGINAL body untouched.
+    That is the guarantee v24 did not have.
+    """
+    def __init__(self, inner):
+        self.inner = inner
+    def __getattr__(self, name):
+        return getattr(self.inner, name)
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http" or scope.get("method") != "GET" or scope.get("path") != "/":
+            return await self.inner(scope, receive, send)
+        start = None
+        chunks = []
+        async def cap(message):
+            nonlocal start
+            if message["type"] == "http.response.start":
+                start = message
+            elif message["type"] == "http.response.body":
+                chunks.append(message.get("body", b""))
+        try:
+            await self.inner(scope, receive, cap)
+        except Exception:
+            # Inner failed: do NOT swallow — re-raise so FastAPI handles it.
+            raise
+        if start is None:
+            return
+        status = start["status"]
+        headers = list(start["headers"])
+        body = b"".join(chunks)
+        try:
+            hd = {k.lower(): v for k, v in headers}
+            ctype = hd.get(b"content-type", b"").decode("latin-1").lower()
+            if status == 200 and "text/html" in ctype and b"content-encoding" not in hd:
+                text = body.decode("utf-8", "ignore")
+                patched = _patch_html(text)  # layout-only, never touches check()
+                if patched != text:
+                    body = patched.encode("utf-8")
+        except Exception:
+            pass  # fail-open: keep original body
+        keep = [(k, v) for k, v in headers if k.lower() not in (b"content-length",)]
+        await send({"type": "http.response.start", "status": status,
+                    "headers": keep + [(b"content-length", str(len(body)).encode())]})
+        await send({"type": "http.response.body", "body": body})
+
+def apply(g: dict) -> None:
     if not isinstance(g, dict):
         raise TypeError("apply expects shared globals dict")
     _ensure_omni(g)
@@ -353,6 +417,10 @@ def _ensure_play(g: dict) -> None:
     html = g.get("HOME_HTML")
     if isinstance(html, str) and html:
         g["HOME_HTML"] = _patch_html(html)
-    # v25: DO NOT wrap g["app"] — the LiveFixASGI wrapper caused the blank page.
-    # main.py already re-exports g["app"] as-is, so leaving it unwrapped is correct.
-    print("[patch_live_fix] applied v25 (CLEAN: no ASGI wrapper, no check() replace, layout-only, tolerant /play)")
+    # v26: wrap ONLY with the minimal fail-open layout wrapper.
+    # It only injects CSS+JS into GET / and returns the original body on any error,
+    # so it cannot blank the page like v24 did.
+    app = g.get("app")
+    if app is not None and not isinstance(app, _SafeLayoutASGI):
+        g["app"] = _SafeLayoutASGI(app)
+    print("[patch_live_fix] applied v26 (CLEAN: fail-open layout wrapper on GET / only, no check() replace, tolerant /play)")
