@@ -1,118 +1,90 @@
-"""main.py — TVibe FILTER loader (THIS file is what Render runs). Order matters.
-Render Start Command: uvicorn main:app --host 0.0.0.0 --port $PORT
-(core.py is now a thin shim, so `uvicorn core:app` also lands here.)
-
-FIXED:
-- /health NameError: mcp_error is not defined
-- /play 422: Field required [query, request]
+"""TVibe FILTER v35 ULTRA — ONE FILE, standalone. Paste as main.py, DONE.
+No core_final, no extensions, no patch_live_fix, no wrapper, no FIX1.
+Old bugs are gone because old code is never loaded.
 """
-from __future__ import annotations
-
-import os
-import sys
-import traceback
-
-ROOT = os.path.dirname(os.path.abspath(__file__))
-if ROOT not in sys.path:
-    sys.path.insert(0, ROOT)
-
-
-def _exec_module_file(path: str, g: dict, label: str) -> None:
-    """Run a .py file in the shared namespace (same pattern as legacy multi-part main)."""
-    if not os.path.isfile(path):
-        print(f"[loader] skip {label}: missing {path}")
-        return
-    with open(path, "r", encoding="utf-8") as f:
-        src = f.read()
-    try:
-        code = compile(src, path, "exec")
-        exec(code, g, g)
-        print(f"[loader] {label} loaded ({os.path.basename(path)})")
-    except Exception as e:
-        print(f"[loader] {label} FAILED: {e}")
-        traceback.print_exc()
-        raise
-
-
-def _apply_patch(modname: str, g: dict) -> None:
-    try:
-        mod = __import__(modname)
-        mod.apply(g)
-        print(f"[loader] {modname} applied")
-    except Exception as e:
-        print(f"[loader] {modname} NOT applied: {e}")
-
-
-def _sync_to_core(core, g: dict) -> None:
-    """Copy names created by extensions/patches back into core_final's module globals.
-
-    /health is DEFINED in core_final, so it looks up globals in core_final.__dict__,
-    NOT in the loader dict `g`. If a name only exists in `g`, /health raises NameError.
-    """
-    for _k, _v in list(g.items()):
-        if _k not in core.__dict__:
-            core.__dict__[_k] = _v
-    # FIX 2: force defaults — even if extensions.py failed / never assigned them.
-    # Never leave mcp_error undefined.
-    core.__dict__.setdefault("mcp_error", None)
-    core.__dict__.setdefault("mcp_server", None)
-    # If extensions DID define it, take the real value (overrides the default).
-    for _k in ("mcp_server", "mcp_error"):
-        if _k in g:
-            core.__dict__[_k] = g[_k]
-
-
-# 1) Core — FastAPI app + base /signal /stats
-import core_final as core  # noqa: E402,F401
-
-# FIX 2 (early): define BEFORE anything runs, so /health can never NameError,
-# even if extensions.py crashes before assigning mcp_error.
-core.__dict__.setdefault("mcp_error", None)
-core.__dict__.setdefault("mcp_server", None)
-
-g = dict(vars(core))
-g["__name__"] = "__main__"
-g["__file__"] = os.path.join(ROOT, "main.py")
-# Also seed the shared dict, so exec'd files see the defaults.
-g.setdefault("mcp_error", None)
-g.setdefault("mcp_server", None)
-
-# 2) features.py — heuristics layers (shared namespace)
-_exec_module_file(os.path.join(ROOT, "features.py"), g, "features")
-_sync_to_core(core, g)
-
-# 3) extensions.py — MCP, /omni, ops, SI (must be after core/features)
-_exec_module_file(os.path.join(ROOT, "extensions.py"), g, "extensions")
-
-# 3b) Sync back to core_final (see _sync_to_core docstring).
-_sync_to_core(core, g)
-
-# 4) Optional patches, in order
-for _name in ("patch_builder", "patch_stats_fix", "patch_p0", "patch_filter_v4", "patch_usdc_pair_v2"):
-    _apply_patch(_name, g)
-    _sync_to_core(core, g)
-
-app = g.get("app")
-if app is None:
-    raise RuntimeError("app not found after loader chain (core → features → extensions)")
-
-# Re-export for uvicorn: main:app
-globals().update(g)
-
-print("[loader] ready app=%s version=%s" % (type(app).__name__, g.get("VERSION") or getattr(app, "version", "?")))
-
-# 5) FINAL (must be last): live homepage check() + /omni fallback + /health never-500
-_apply_patch("patch_live_fix", g)
-_sync_to_core(core, g)
-app = g.get("app")  # wrapped app (patch_live_fix) — this is what uvicorn serves
-globals()["app"] = app
-
-# v34: FIX 1 REMOVED — it re-added /play with a param named `request` AFTER patch_live_fix,
-# so FastAPI treated `request` as required query -> 422 {loc:[query,request]}.
-# /play + /omni are now owned ONLY by patch_live_fix v34. Do not re-add them here.
-
-# Final guarantee for /health, after ALL patches.
-core.__dict__.setdefault("mcp_error", None)
-core.__dict__.setdefault("mcp_server", None)
-g.setdefault("mcp_error", core.__dict__["mcp_error"])
-g.setdefault("mcp_server", core.__dict__["mcp_server"])
+import re, time
+from fastapi import FastAPI, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
+import httpx
+MINT_RE = re.compile(r"^[1-9A-HJ-NP-Za-km-z]{32,44}$")
+app = FastAPI(title="TVibe FILTER")
+HOME = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TVibe FILTER</title><style>body{background:#0B0B14;color:#fff;font-family:Arial,sans-serif;margin:0;padding:20px}h1{font-size:28px;margin:0 0 6px}.sub{color:#aaa;margin:0 0 18px}label{font-size:19px;font-weight:700;display:block;margin:0 0 8px}#mint{width:100%;box-sizing:border-box;font-size:22px;padding:18px 20px;min-height:64px;border:2px solid #00F0FF;border-radius:14px;background:#0B0B14;color:#fff;outline:none}#mint:focus{border-color:#00FF9D}button{margin-top:12px;min-height:64px;font-size:20px;font-weight:800;padding:0 28px;border:0;border-radius:14px;background:#00FF9D;color:#000;cursor:pointer;width:100%}#out{margin-top:18px;font-size:16px;line-height:1.6}.links{margin-top:14px;font-size:13px;color:#888}.links a{color:#00F0FF}</style></head><body><h1>TVibe FILTER</h1><p class="sub">Paste a token mint. Check before you sell. Not financial advice.</p><label for="mint">TOKEN TO SELL</label><input id="mint" placeholder="Paste a token mint..." autocomplete="off"><button onclick="check()">CHECK</button><div id="out"></div><div class="links"><a href="/agent.json" target="_blank">Endpoint for Agents: /agent.json</a> &nbsp;|&nbsp; <a href="/health" target="_blank">/health</a></div><script>async function check(){const m=(document.getElementById('mint').value||'').trim();const out=document.getElementById('out');const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));if(!m){out.innerHTML='<b>Paste a mint first.</b>';return;}if(!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(m)){out.innerHTML='<b>Not a Solana mint (32-44 base58 chars).</b>';return;}const q=encodeURIComponent(m);out.innerHTML='<b>Checking live...</b>';try{const r=await fetch('/omni?mint='+q,{cache:'no-store'});const d=await r.json().catch(()=>({}));if(!r.ok){out.innerHTML='<b style="color:#FF4D8D">Error '+r.status+'</b><br>'+esc(d.detail||d.error||'Upstream down');return;}if(d.error&&!d.verdict){out.innerHTML='<b>Could not score</b><br>'+esc(d.error);return;}const raw=String(d.verdict||'').toLowerCase();const label=raw==='pass'?'PASS':raw==='skip'?'SKIP':'REVIEW';const c=label==='PASS'?'#00FF9D':label==='SKIP'?'#FF4D8D':'#FFD166';const bl=(d.blockers||[]).slice(0,4).map(x=>'<li>'+esc(x)+'</li>').join('');out.innerHTML='<span style="display:inline-block;padding:6px 12px;font-weight:800;background:'+c+';color:#000">'+label+'</span> <b>Risk '+esc(d.risk_score??'-')+' | Liquidity $'+esc(d.liquidity_usd??'-')+' | Price $'+esc(d.price_usd??'-')+'</b>'+(bl?'<ul>'+bl+'</ul>':'')+'<br><a href="/omni?mint='+q+'" target="_blank" style="color:#00F0FF">Open /omni JSON</a>';}catch(e){out.innerHTML='<b style="color:#FF4D8D">Network error — try again.</b>';}}</script></body></html>"""
+async def score(mint: str):
+    # Deep-ish engine: DexScreener (pair + liquidity + price) + RugCheck (risks). Fail-open: never 500.
+    async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as c:
+        pair = None
+        try:
+            r = await c.get(f"https://api.dexscreener.com/latest/dex/tokens/{mint}")
+            if r.status_code == 200:
+                pairs = (r.json() or {}).get("pairs") or []
+                sol = [p for p in pairs if (p.get("chainId") == "solana")]
+                pool = sol or pairs
+                if pool:
+                    pair = max(pool, key=lambda p: float((p.get("liquidity") or {}).get("usd") or 0))
+        except Exception:
+            pair = None
+        if not pair:
+            return {"mint": mint, "verdict": "review", "action": "review", "risk_score": None, "liquidity_usd": None, "price_usd": None, "blockers": [], "unknowns": ["no_pair"], "error": "No pair found on DexScreener for this mint. Brand-new token, USDC pair, wrong mint, or DexScreener slow — try again.", "nfa": True}
+        liq = float((pair.get("liquidity") or {}).get("usd") or 0)
+        price = pair.get("priceUsd")
+        try:
+            price = float(price) if price is not None else None
+        except Exception:
+            price = None
+        vol = float((pair.get("volume") or {}).get("h24") or 0)
+        # RugCheck — best effort only
+        rug = {}
+        try:
+            rr = await c.get(f"https://api.rugcheck.xyz/v1/tokens/{mint}/report", timeout=12.0)
+            if rr.status_code == 200:
+                rug = rr.json() or {}
+        except Exception:
+            rug = {}
+        blockers, unknowns, risk = [], [], 0
+        if liq < 1000:
+            blockers.append("Liquidity is very low"); risk += 45
+        elif liq < 10000:
+            blockers.append("Liquidity is low"); risk += 25
+        if vol == 0:
+            unknowns.append("No trades in last 24h"); risk += 15
+        tr = rug.get("token") or {}
+        if rug.get("score") is not None:
+            try: risk = max(risk, min(100, int(rug.get("score") or 0)))
+            except Exception: pass
+        for x in (rug.get("risks") or []):
+            name = (x.get("name") or x.get("description") or str(x)) if isinstance(x, dict) else str(x)
+            if name: unknowns.append(str(name)[:90])
+        verdict = "skip" if (risk >= 70 or blockers) else "pass" if (risk < 30 and liq >= 10000) else "review"
+        return {"mint": mint, "verdict": verdict, "action": verdict, "risk_score": risk, "liquidity_usd": liq, "price_usd": price, "volume_24h_usd": vol, "pair": {"dex": pair.get("dexId"), "pairAddress": pair.get("pairAddress"), "base": (pair.get("baseToken") or {}).get("symbol"), "quote": (pair.get("quoteToken") or {}).get("symbol")}, "blockers": blockers[:4], "unknowns": unknowns[:6], "rugcheck_score": rug.get("score"), "valid_for_s": 30, "nfa": True}
+@app.get("/", response_class=HTMLResponse)
+async def home(request: Request):
+    return HTMLResponse(content=HOME, status_code=200)
+@app.get("/health")
+async def health():
+    return {"status": "ok", "version": "v35-ultra", "ts": int(time.time())}
+@app.get("/agent.json")
+async def agent_json():
+    return {"name": "TVibe Signal", "version": "v35-ultra", "endpoints": {"check": "GET /omni?mint=<MINT>", "play": "GET /play?mint=<MINT>", "health": "GET /health"}, "verdicts": ["PASS", "REVIEW", "SKIP"], "rules": ["Always call /omni. Never guess.", "Error + no verdict = could-not-score, never PASS.", "Mint = 32-44 base58. SOL mint has no pair."], "nfa": True}
+@app.get("/agent", response_class=PlainTextResponse)
+async def agent():
+    return "# TVibe Signal\nCheck: GET /omni?mint=<MINT>\nVerdicts: PASS / REVIEW / SKIP\nNever guess. Error + no verdict = could-not-score, never PASS.\nNot financial advice.\n"
+@app.get("/__main_status")
+async def main_status():
+    return {"main_py": "v35-ultra-standalone", "patch_live_fix": "not-needed", "engine": "dexscreener+rugcheck", "wrapper": "none"}
+async def _omni_impl(request: Request, mint, view):
+    m = ((mint or "") or "").strip() or (request.query_params.get("mint") or request.query_params.get("request") or "").strip()
+    if not m:
+        return {"mint": None, "error": "mint is required: /omni?mint=<MINT>", "nfa": True}
+    if not MINT_RE.match(m):
+        return {"mint": m, "error": "Invalid Solana token mint address", "nfa": True}
+    pkt = await score(m)
+    if (view or "").lower() in ("agent", "compact", "action"):
+        return {"mint": pkt.get("mint"), "action": pkt.get("action"), "verdict": pkt.get("verdict"), "risk_score": pkt.get("risk_score"), "liquidity_usd": pkt.get("liquidity_usd"), "unknowns": pkt.get("unknowns", [])[:6], "blockers": pkt.get("blockers", [])[:6], "valid_for_s": 30, "nfa": True}
+    return pkt
+@app.get("/omni")
+async def omni(request: Request, mint: str | None = Query(default=None), view: str = Query("full")):
+    return JSONResponse(content=await _omni_impl(request, mint, view), status_code=200)
+@app.get("/play")
+async def play(request: Request, mint: str | None = Query(default=None), view: str = Query("full")):
+    # NOTE: param is named `mint`, NOT `request` — that was the 422 cause. ?request= still works via query_params.
+    return JSONResponse(content=await _omni_impl(request, mint, view), status_code=200)
