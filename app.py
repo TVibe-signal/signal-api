@@ -1,5 +1,5 @@
 
-# TVibe Signal v40.2 Paper - English only, paper-yellow theme
+# TVibe Signal v40.3 Paper - English only, paper-yellow theme
 # File: app.py (FastAPI, uvicorn app:app)
 
 import os, json, hashlib, time, math, threading, csv, io
@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request, Query
 from fastapi.responses import JSONResponse, HTMLResponse, Response
 
 app = FastAPI(title="TVibe Signal")
-VERSION = "v40.2-paper"
+VERSION = "v40.3-helius-only"
 START = time.time()
 CHECKS = {"count": 0}
 
@@ -26,6 +26,33 @@ WARN_24H = _f("TVIBE_WARN_24H_PCT", -20)
 ADMIN_KEY = os.getenv("TVIBE_ADMIN_KEY", "")
 UPSTASH_URL = os.getenv("UPSTASH_REDIS_REST_URL", "").rstrip("/")
 UPSTASH_TOKEN = os.getenv("UPSTASH_REDIS_REST_TOKEN", "")
+
+# ---------- RPC: Helius only -> DexScreener only ----------
+# Keys are NEVER in code. They live in Render Env only.
+# Supported Env (only 1 needed): SOLANA_RPC_URL (already in Render, Helius) OR HELIUS_API_KEY OR HELIUS_RPC_URL
+# QuickNode removed per user request - Helius only.
+_HELIUS_KEY = os.getenv("HELIUS_API_KEY", "").strip()
+_HELIUS_URL_ENV = os.getenv("HELIUS_RPC_URL", "").strip()
+_SOLANA_RPC_ENV = os.getenv("SOLANA_RPC_URL", "").strip()
+
+def _build_rpc_urls():
+    helius = ""
+    if _HELIUS_URL_ENV:
+        helius = _HELIUS_URL_ENV
+    elif _HELIUS_KEY:
+        helius = f"https://mainnet.helius-rpc.com/?api-key={_HELIUS_KEY}"
+    elif _SOLANA_RPC_ENV:
+        # SOLANA_RPC_URL in Render is already the Helius URL - use it directly
+        helius = _SOLANA_RPC_ENV
+    return helius
+
+HELIUS_URL = _build_rpc_urls()
+RPC_CONFIGURED = bool(HELIUS_URL)
+
+# On-chain cache: 5 min per mint, saves Helius credits
+_RPC_CACHE = {}
+_RPC_CACHE_TTL = 300
+
 
 _locks = {}
 _locks_guard = threading.Lock()
@@ -69,6 +96,146 @@ def fetch_pair(mint):
     pairs=r.json().get("pairs") or []
     if not pairs: return None
     return sorted(pairs, key=lambda p: (p.get("liquidity") or {}).get("usd") or 0, reverse=True)[0]
+
+# ---------- Helius on-chain ----------
+def _rpc_get_mint_info_single(rpc_url, mint):
+    """One RPC call: getAccountInfo jsonParsed for a mint. Returns dict or None on failure."""
+    try:
+        payload = {"jsonrpc":"2.0","id":1,"method":"getAccountInfo","params":[mint, {"encoding":"jsonParsed"}]}
+        r = requests.post(rpc_url, json=payload, timeout=6)
+        if r.status_code != 200:
+            return None
+        j = r.json()
+        if "error" in j and j["error"]:
+            return None
+        val = (j.get("result") or {}).get("value")
+        if val is None:
+            return {"exists": False}
+        data = val.get("data")
+        info = None
+        if isinstance(data, dict):
+            parsed = data.get("parsed") or {}
+            info = parsed.get("info") or {}
+        if not info:
+            return {"exists": True, "raw": True}
+        # info: mintAuthority, freezeAuthority, supply, decimals
+        mint_auth = info.get("mintAuthority")
+        freeze_auth = info.get("freezeAuthority")
+        # In jsonParsed, authorities can be string or None. Some RPCs return dict.
+        if isinstance(mint_auth, dict):
+            mint_auth = mint_auth.get("address") or mint_auth.get("pubkey")
+        if isinstance(freeze_auth, dict):
+            freeze_auth = freeze_auth.get("address") or freeze_auth.get("pubkey")
+        return {
+            "exists": True,
+            "mint_authority": mint_auth,  # None = renounced (good)
+            "freeze_authority": freeze_auth,  # None = no freeze (good)
+            "decimals": info.get("decimals"),
+            "supply": info.get("supply"),
+            "is_native": info.get("isNative"),
+        }
+    except Exception:
+        return None
+
+def get_onchain(mint):
+    """Helius only. Cached 5 min. Never raises. Never blocks verdict."""
+    m = (mint or "").strip()
+    now = time.time()
+    if m in _RPC_CACHE:
+        ts, val = _RPC_CACHE[m]
+        if now - ts < _RPC_CACHE_TTL:
+            return val
+    # Helius only - no QuickNode
+    chain = []
+    if HELIUS_URL:
+        chain.append(("helius", HELIUS_URL))
+    result = None
+    for label, url in chain:
+        t0 = time.time()
+        info = _rpc_get_mint_info_single(url, m)
+        latency = int((time.time() - t0) * 1000)
+        if info is not None:
+            result = dict(info)
+            result["rpc_source"] = label
+            result["rpc_latency_ms"] = latency
+            result["available"] = True
+            break
+    if result is None:
+        result = {"available": False, "rpc_source": "none", "rpc_latency_ms": 0}
+    _RPC_CACHE[m] = (now, result)
+    # Keep cache small
+    if len(_RPC_CACHE) > 500:
+        try:
+            oldest = sorted(_RPC_CACHE.items(), key=lambda kv: kv[1][0])[:100]
+            for k, _ in oldest:
+                _RPC_CACHE.pop(k, None)
+        except Exception:
+            pass
+    return result
+
+def enrich_with_onchain(obj, onchain):
+    """Add on-chain authorities to obj and adjust score/verdict. Keeps thresholds private (not shown on web)."""
+    if not onchain or not onchain.get("available"):
+        obj["onchain"] = {"available": False, "rpc_source": "none", "mint_authority": None, "freeze_authority": None, "authorities_renounced": None, "note": "On-chain check unavailable. Verdict from market data only."}
+        return obj
+    mint_auth = onchain.get("mint_authority")
+    freeze_auth = onchain.get("freeze_authority")
+    # mint_authority could be missing if raw=True
+    if onchain.get("raw"):
+        obj["onchain"] = {"available": True, "rpc_source": onchain.get("rpc_source"), "mint_authority": None, "freeze_authority": None, "authorities_renounced": None, "decimals": onchain.get("decimals"), "supply": onchain.get("supply"), "note": "Mint exists on-chain. Authority details not parsed."}
+        return obj
+    renounced = (mint_auth is None and freeze_auth is None)
+    obj["onchain"] = {
+        "available": True,
+        "rpc_source": onchain.get("rpc_source"),
+        "rpc_latency_ms": onchain.get("rpc_latency_ms"),
+        "mint_authority": mint_auth,
+        "freeze_authority": freeze_auth,
+        "authorities_renounced": renounced,
+        "decimals": onchain.get("decimals"),
+        "supply": onchain.get("supply"),
+    }
+    flags = list(obj.get("flags") or [])
+    extra = 0
+    if mint_auth is not None:
+        if "mint_authority_not_renounced" not in flags:
+            flags.append("mint_authority_not_renounced")
+        extra += 10
+    if freeze_auth is not None:
+        if "freeze_authority_active" not in flags:
+            flags.append("freeze_authority_active")
+        extra += 12
+    if renounced:
+        if "authorities_renounced" not in flags:
+            flags.append("authorities_renounced")
+    if extra:
+        obj["flags"] = flags
+        new_score = max(0, min(100, int(obj.get("risk_score", 0) + extra)))
+        obj["risk_score"] = new_score
+        # Recompute verdict / p_bad with same logic as compute()
+        ch24 = float(obj.get("change_24h_pct") or 0)
+        if new_score >= 55 or "dead_pool" in flags or ch24 <= DUMP_24H:
+            obj["verdict"] = "avoid"; obj["label"] = "SELL"
+        elif new_score >= 35 or float(obj.get("liquidity_usd") or 0) < LIQ_HOLD or ch24 <= WARN_24H:
+            obj["verdict"] = "caution"; obj["label"] = "HOLD-BUY"
+        else:
+            obj["verdict"] = "ok"; obj["label"] = "PASS"
+        p_bad = p_bad_from_score(new_score)
+        k = int(round(p_bad * 100)); lo, hi = wilson_ci(k, 100)
+        obj["p_bad_24h"] = round(p_bad, 4); obj["p_bad_ci_low"] = round(lo, 4); obj["p_bad_ci_high"] = round(hi, 4)
+        if obj["verdict"] == "avoid":
+            if "freeze_authority_active" in flags and "mint_authority_not_renounced" in flags:
+                obj["why"] = "Mint and freeze authorities are still active, so supply can change and transfers can be frozen. High downside risk."
+            elif "freeze_authority_active" in flags:
+                obj["why"] = "Freeze authority is still active, so transfers can be frozen. High downside risk."
+            elif "mint_authority_not_renounced" in flags:
+                obj["why"] = "Mint authority is still active, so new supply can be minted. High downside risk."
+        elif obj["verdict"] == "caution" and (mint_auth is not None or freeze_auth is not None):
+            obj["why"] = "Mixed signals plus active on-chain authority. Tradable but risky — size carefully and watch price and liquidity."
+    else:
+        obj["flags"] = flags
+    return obj
+
 
 def compute(mint,pair):
     liq=float((pair.get("liquidity") or {}).get("usd") or 0)
@@ -166,13 +333,13 @@ button:hover{background:#000}
 HOME = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>TVibe Signal — Check any Solana token</title><meta name="description" content="TVibe Signal checks Solana tokens and returns PASS / HOLD-BUY / SELL with real numbers and p_bad_24h.">
 <style>""" + CSS + """</style></head><body>
-<div class="top"><div class="logo">TVibe Signal <span>v40.2</span></div><div class="nav"><a href="#how">How it works</a><a href="#api">For Agents</a><a href="/health">Health</a></div></div>
+<div class="top"><div class="logo">TVibe Signal <span>v40.3</span></div><div class="nav"><a href="#how">How it works</a><a href="#api">For Agents</a><a href="/health">Health</a></div></div>
 <div class="wrap"><div class="hero"><div>
 <div style="font-size:12px;letter-spacing:1.2px;text-transform:uppercase;color:#6b5d3f;font-weight:700">Solana Token Check • Real Numbers • No Hype</div>
 <h1>Know before<br><em>you buy.</em></h1>
 <p class="sub">Paste a Solana mint. Get a clear verdict — <b>PASS / HOLD-BUY / SELL</b> — plus real price, liquidity, volume and the probability of a bad outcome in 24h.</p>
 <div style="display:flex;gap:10px;margin-top:16px;flex-wrap:wrap"><span style="background:#1a1610;color:#fdf3d8;padding:8px 12px;border-radius:999px;font-size:13px;font-weight:700">✓ English only</span><span style="background:#fff;border:1px solid #e2d3a8;padding:8px 12px;border-radius:999px;font-size:13px">✓ No thresholds shown</span><span style="background:#fff;border:1px solid #e2d3a8;padding:8px 12px;border-radius:999px;font-size:13px">✓ Agent-ready JSON</span></div>
-<div class="grid3"><div class="mini"><b>Real numbers, not opinions</b><p>Price, liquidity, volume, 24h change, age and FDV — straight from the market.</p></div><div class="mini"><b>p_bad_24h + confidence</b><p>Probability of a bad outcome in the next 24h, with a confidence interval.</p></div><div class="mini"><b>Private rules</b><p>We show the verdict and the data. The decision rules stay private.</p></div></div>
+<div class="grid3"><div class="mini"><b>Real numbers, not opinions</b><p>Price, liquidity, volume, 24h change, age and FDV — straight from the market.</p></div><div class="mini"><b>p_bad_24h + confidence</b><p>Probability of a bad outcome in the next 24h, with a confidence interval.</p></div><div class="mini"><b>Private rules</b><p>We show the verdict and the data. The decision rules stay private.</p></div><div class="mini"><b>On-chain check</b><p>Mint + freeze authorities via Helius only. Renounced = safer.</p></div></div>
 </div>
 <div><div class="card"><h3>Check a token</h3><p style="margin:0;color:#6b5d3f;font-size:13px">Enter a Solana mint address.</p>
 <form method="get" action="/check"><div class="inputrow"><input name="mint" placeholder="Paste mint, e.g. 98vd3Covp..." required><button>CHECK →</button></div></form>
@@ -195,24 +362,35 @@ Response:
   "flags": ["dead_pool", "new_pair"]
 }</div><div style="margin-top:10px;font-size:13px"><a href="/health">/health</a> · <a href="/calibration">/calibration</a> · <a href="/check?mint=98vd3CovpBmHJGN2z9SiZRxM8QBVcc9Gnvq1Rdjnpump&format=json">Try JSON →</a></div></div>
 </div></div>
-<div class="card" id="how" style="margin-top:18px"><h3>How it works</h3><p style="color:#6b5d3f;font-size:14px;line-height:1.6;margin:6px 0 0">1. We fetch the live pair from the market. &nbsp; 2. We score risk from liquidity, activity, age and price action. &nbsp; 3. You get a verdict + real numbers + p_bad_24h. &nbsp; Rules and thresholds are private — the data is not.</p></div>
-<div class="foot"><span>© 2026 TVibe Signal — Built for traders and agents.</span><span>Paper Edition • v40.2 • English only</span></div></div></body></html>"""
+<div class="card" id="how" style="margin-top:18px"><h3>How it works</h3><p style="color:#6b5d3f;font-size:14px;line-height:1.6;margin:6px 0 0">1. We fetch the live pair from the market. &nbsp; 2. We check on-chain authorities via Helius (mint + freeze). &nbsp; 3. We score risk from liquidity, activity, age, price action and on-chain authorities. &nbsp; 4. You get a verdict + real numbers + p_bad_24h. &nbsp; Rules and thresholds are private — the data is not.</p></div>
+<div class="foot"><span>© 2026 TVibe Signal — Built for traders and agents.</span><span>Paper Edition • v40.3 • English only</span></div></div></body></html>"""
 
 def result_html(o):
     cls = "pass" if o["verdict"]=="ok" else ("hold" if o["verdict"]=="caution" else "sell")
     pct = int(o["p_bad_24h"]*100)
     flags = "".join([f'<span class="flag">{f}</span>' for f in o["flags"]]) or '<span class="flag">No flags</span>'
+    _oc = o.get("onchain") or {}
+    if _oc.get("available"):
+        _ma = _oc.get("mint_authority")
+        _fa = _oc.get("freeze_authority")
+        _ma_txt = "Renounced ✓" if _ma is None and not _oc.get("raw") else (str(_ma)[:12] + "… — Active" if _ma else "Unknown")
+        _fa_txt = "None ✓" if _fa is None and not _oc.get("raw") else (str(_fa)[:12] + "… — Active" if _fa else "Unknown")
+        _src = _oc.get("rpc_source") or "on-chain"
+        onchain_html = f'<div style="margin-top:14px;background:#fff;border:1px solid #e2d3a8;border-radius:12px;padding:12px"><b style="font-size:13px">On-chain — via {_src}</b><div style="font-size:13px;color:#6b5d3f;line-height:1.6;margin-top:4px">Mint authority: <b style="color:#1a1610">{_ma_txt}</b> &nbsp;•&nbsp; Freeze authority: <b style="color:#1a1610">{_fa_txt}</b> &nbsp;•&nbsp; Decimals: {_oc.get("decimals") if _oc.get("decimals") is not None else "—"}</div><div style="font-size:12px;color:#6b5d3f">If mint / freeze is still active, supply can change or transfers can be frozen.</div></div>'
+    else:
+        onchain_html = '<div style="margin-top:14px;background:#fff;border:1px solid #e2d3a8;border-radius:12px;padding:12px;font-size:13px;color:#6b5d3f"><b style="color:#1a1610">On-chain:</b> Unavailable for this check. Verdict from market data only.</div>' 
     return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TVibe — {o['symbol']} {o['label']}</title><style>{CSS}</style></head><body>
-<div class="top"><div class="logo">TVibe Signal <span>v40.2</span></div><div class="nav"><a href="/">← New check</a><a href="/health">Health</a></div></div>
+<div class="top"><div class="logo">TVibe Signal <span>v40.3</span></div><div class="nav"><a href="/">← New check</a><a href="/health">Health</a></div></div>
 <div class="wrap"><div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap"><div><div style="font-size:12px;letter-spacing:1px;text-transform:uppercase;color:#6b5d3f;font-weight:700">Token Report</div><h1 style="font-size:42px;margin:6px 0">{o['symbol']} <span style="font-weight:400;color:#6b5d3f;font-size:26px">— {o['name']}</span></h1><div style="font-size:13px;color:#6b5d3f">Mint: <code>{o['mint']}</code></div></div><span class="badge {cls}">{o['label']} — {o['risk_score']}/100</span></div>
 <div class="card" style="margin-top:16px"><div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><div style="font-size:12px;letter-spacing:0.8px;text-transform:uppercase;color:#6b5d3f">Probability of bad outcome in 24h</div><div style="font-size:36px;font-weight:900">{o['p_bad_24h']:.2%} <span style="font-size:14px;font-weight:600;color:#6b5d3f">CI {o['p_bad_ci_low']:.2%} – {o['p_bad_ci_high']:.2%}</span></div><div class="bar"><i style="width:{pct}%"></i></div></div><div style="max-width:340px"><b>Why this verdict?</b><p style="color:#6b5d3f;font-size:14px;line-height:1.6;margin:6px 0 0">{o['why']}</p></div></div>
 <div class="kpi"><div class="k"><div class="l">Price</div><div class="v">${o['price_usd']:.8g}</div><div class="s">USD</div></div><div class="k"><div class="l">Liquidity</div><div class="v">${o['liquidity_usd']:,.0f}</div><div class="s">Total in pool</div></div><div class="k"><div class="l">Volume 24h</div><div class="v">${o['volume_24h']:,.0f}</div><div class="s">Trading activity</div></div><div class="k"><div class="l">Change 24h</div><div class="v">{round(o['change_24h_pct'],2)}%</div><div class="s">Price move</div></div><div class="k"><div class="l">Age</div><div class="v">{o['age_h']}h</div><div class="s">Pair age</div></div><div class="k"><div class="l">FDV</div><div class="v">${o['fdv']:,.0f}</div><div class="s">Fully diluted value</div></div></div>
+{onchain_html}
 <div style="margin-top:14px;display:flex;gap:8px;flex-wrap:wrap">{flags}</div>
 <div style="margin-top:16px;display:flex;gap:14px;flex-wrap:wrap;font-size:14px">{'<a href="'+o['pair_url']+'" target="_blank">View pair on DexScreener →</a>' if o['pair_url'] else ''}<a href="/check?mint='+o['mint']+'&format=json">View as JSON for agents →</a><a href="/">← Check another token</a></div>
-</div><div class="foot"><span>Verdict: {o['verdict']} • Risk score: {o['risk_score']}/100 • TVibe Signal v40.2</span><span>Data is real. Rules are private.</span></div></div></body></html>"""
+</div><div class="foot"><span>Verdict: {o['verdict']} • Risk score: {o['risk_score']}/100 • TVibe Signal v40.3</span><span>Data is real. Rules are private.</span></div></div></body></html>"""
 
 @app.get("/health")
-def health(): return {"status":"ok","version":VERSION,"uptime_s":int(time.time()-START),"checks":CHECKS["count"]}
+def health(): return {"status":"ok","version":VERSION,"uptime_s":int(time.time()-START),"checks":CHECKS["count"],"rpc_configured":RPC_CONFIGURED,"rpc_sources":{"helius":bool(HELIUS_URL)},"onchain_cache":len(_RPC_CACHE)}
 @app.get("/", response_class=HTMLResponse)
 def index(): return HOME
 @app.get("/check")
@@ -226,9 +404,15 @@ def check(request: Request, mint: str = Query(default=""), token: str = Query(de
         pair=fetch_pair(m)
         if not pair: return JSONResponse({"mint":m,"status":"not_found","verdict":"avoid","label":"SELL","p_bad_24h":0.9}, status_code=404)
         obj=compute(m,pair)
+        # Helius enrichment: never blocks verdict, never 500s
+        try:
+            oc = get_onchain(m)
+            obj = enrich_with_onchain(obj, oc)
+        except Exception:
+            obj["onchain"] = {"available": False, "rpc_source": "none", "note": "On-chain check failed. Verdict from market data only."}
         try: append_ledger(obj)
         except: pass
-        out={"mint":obj["mint"],"symbol":obj["symbol"],"name":obj["name"],"verdict":obj["verdict"],"label":obj["label"],"risk_score":obj["risk_score"],"p_bad_24h":obj["p_bad_24h"],"p_bad_ci":[obj["p_bad_ci_low"],obj["p_bad_ci_high"]],"price_usd":obj["price_usd"],"liquidity_usd":obj["liquidity_usd"],"volume_24h":obj["volume_24h"],"change_24h_pct":obj["change_24h_pct"],"age_h":obj["age_h"],"fdv":obj["fdv"],"flags":obj["flags"],"pair_url":obj["pair_url"],"why":obj["why"],"ts":obj["ts"],"version":VERSION,"status":"ok"}
+        out={"mint":obj["mint"],"symbol":obj["symbol"],"name":obj["name"],"verdict":obj["verdict"],"label":obj["label"],"risk_score":obj["risk_score"],"p_bad_24h":obj["p_bad_24h"],"p_bad_ci":[obj["p_bad_ci_low"],obj["p_bad_ci_high"]],"price_usd":obj["price_usd"],"liquidity_usd":obj["liquidity_usd"],"volume_24h":obj["volume_24h"],"change_24h_pct":obj["change_24h_pct"],"age_h":obj["age_h"],"fdv":obj["fdv"],"flags":obj["flags"],"pair_url":obj["pair_url"],"why":obj["why"],"ts":obj["ts"],"version":VERSION,"status":"ok","onchain":obj.get("onchain") or {"available":False,"rpc_source":"none"}}
         if format=="json": return out
         if format=="html": return HTMLResponse(result_html(obj))
         if "text/html" in (request.headers.get("accept") or ""): return HTMLResponse(result_html(obj))
