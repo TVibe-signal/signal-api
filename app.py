@@ -1,10 +1,10 @@
-"""TVibe FILTER v36 - BLANK-PROOF. Upload this file as app.py."""
+"""TVibe FILTER v36.1 - CHECK FIX. Upload this file as app.py (overwrite)."""
 import time, urllib.request, json
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse, JSONResponse
 
 app = FastAPI(title="TVibe Signal")
-VERSION = "v36-blankproof"
+VERSION = "v36.1-check-fix"
 SOL_MINT = "So11111111111111111111111111111111111111112"
 
 HTML = """<!doctype html><html><head><meta charset="utf-8">
@@ -24,19 +24,20 @@ button:disabled{opacity:.6}
 <h1>TVibe Signal</h1><p>Check before you sell. Paste a token mint.</p>
 <label>TOKEN TO SELL</label>
 <input id="mint" placeholder="Paste token mint..." autocomplete="off">
-<button id="btn" onclick="check()">CHECK</button>
+<button type="button" id="btn" onclick="check()">CHECK</button>
 <div id="out">Paste a mint then press CHECK.</div>
 </div><script>
 async function check(){
-  const m=document.getElementById('mint').value.trim();
-  const out=document.getElementById('out'); const btn=document.getElementById('btn');
+  var m=document.getElementById('mint').value.trim();
+  var out=document.getElementById('out');
+  var btn=document.getElementById('btn');
   if(!m){out.textContent='Paste a mint first.'; return;}
   btn.disabled=true; out.textContent='Checking...';
   try{
-    const r=await fetch('/check?mint='+encodeURIComponent(m));
-    const j=await r.json();
-    if(j.error){out.textContent='\u274c '+j.error; return;}
-    out.innerHTML='<div class="b">'+j.verdict+'</div>'+j.reason+'\n\nPrice: $'+j.price+'\nLiquidity: $'+j.liquidity+'\nVolume 24h: $'+j.volume+'\nAge: '+j.age_h+'h\nDEX: '+j.dex+'\nMint: '+j.mint;
+    var r=await fetch('/check?mint='+encodeURIComponent(m));
+    var j=await r.json();
+    if(j.error){out.textContent='X '+j.error; btn.disabled=false; return;}
+    out.innerHTML='<div class="b">'+j.verdict+'</div><div>'+j.reason+'</div><div>Price: $'+j.price+'</div><div>Liquidity: $'+j.liquidity+'</div><div>Volume 24h: $'+j.volume+'</div><div>Age: '+j.age_h+'h</div><div>DEX: '+j.dex+'</div><div>Mint: '+j.mint+'</div>';
   }catch(e){ out.textContent='Network error, try again.'; }
   btn.disabled=false;
 }
