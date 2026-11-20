@@ -1,6 +1,6 @@
 """TVibe Signal v38 - "Check before you sell". Upload as app.py (overwrite).
 Needs only: fastapi + uvicorn (no extra packages). Data: DexScreener -> GeckoTerminal fallback.
-Public endpoints: /  /check?mint=  /rules  /health  /llms.txt  /docs
+Public endpoints: /  /check?mint=  /health  /llms.txt  /docs
 """
 import json, os, re, time, threading, urllib.request, urllib.error
 from concurrent.futures import ThreadPoolExecutor
@@ -22,7 +22,7 @@ STALE_MAX = 900         # seconds an old result may be shown if all sources fail
 RATE_PER_MIN = 40       # requests / minute / IP on /check
 DISCLAIMER = "Heuristic signal from public market data. Not financial advice. Low liquidity = hard to exit."
 
-# ---- public thresholds (shown on the page and at /rules) ----
+# ---- thresholds (private, used for verdict only) ----
 T = {"liq_sell": 5000, "liq_hold": 20000, "vol_min": 1000, "vol_liq_hold": 0.5,
      "age_min_h": 1, "dump_24h_pct": -50, "warn_24h_pct": -20,
      "exit_sell_loss_pct": 30, "exit_watch_loss_pct": 10, "exit_sizes_usd": [100, 1000]}
@@ -55,7 +55,7 @@ SCORE_TEXT = ("Health score 0-100 = liquidity (up to 40: $50k+ is full) + turnov
 STATUS_TEXT = "pass = good, warn = caution (can cause WATCH), fail = triggers SELL, info = shown for context only, does not change the verdict."
 
 app = FastAPI(title="TVibe Signal", version=VERSION,
-              description="Check a Solana token before you sell. One request, one verdict, all numbers public.")
+              description="Check a Solana token before you sell. One request, one verdict from live data.")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["GET"], allow_headers=["*"])
 
 # ---------------------------------------------------------------- helpers
@@ -258,7 +258,7 @@ ACTIONS = {"sell": "Avoid buying. Exit risk is high.", "watch": "Wait and watch.
            "hold": "Looks healthy right now.", "unknown": "No verdict. Retry in a few seconds.", "skip": "Not applicable."}
 
 def chk(cid, label, value, rule, status, note):
-    return {"id": cid, "label": label, "value": value, "rule": rule, "status": status, "note": note}
+    return {"id": cid, "label": label, "value": value, "status": status, "note": note}
 
 def build_checks(mk, sec=None, ext=None, deep=True):
     liq, vol, ratio, ch, age = mk["liquidity_usd"], mk["volume_24h_usd"], mk["vol_liq_ratio"], mk["price_change_pct"]["h24"], mk["age_hours"]
@@ -480,23 +480,19 @@ def health():
 
 @app.get("/rules")
 def rules():
-    return {"version": RULES_VERSION, "decision_order": DECISION_ORDER, "thresholds": THRESHOLDS, "raw_thresholds": T,
-            "score": SCORE_TEXT, "check_status": STATUS_TEXT, "sources": [n for n, _ in SOURCES] + ["rugcheck (security)", "jupiter (exit quotes)"],
-            "verdicts": {"SELL": "Exit risk is high.", "WATCH": "Not a clear signal. Wait.", "HOLD / BUY": "Looks healthy now.",
-                         "UNKNOWN": "No data. Retry.", "SKIP": "Base asset, not applicable."},
-            "limits": {"requests_per_minute_per_ip": RATE_PER_MIN, "cache_seconds": CACHE_TTL, "jupiter_key_set": bool(JUP_KEY)}, "disclaimer": DISCLAIMER}
+    return {"version": RULES_VERSION, "note": "Rules are private to prevent gaming."}
 
 @app.get("/llms.txt", response_class=PlainTextResponse)
 def llms():
-    return ("# TVibe Signal %s\n> Check a Solana token before you sell. One request, one verdict, every number public.\n\n"
+    return ("# TVibe Signal %s\n> Check a Solana token before you sell. One request, one verdict, live market, security and exit data.\n\n"
             "GET /check?mint=<SOLANA_MINT>  -> JSON\n"
             "Read: verdict (SELL | WATCH | HOLD / BUY | UNKNOWN | SKIP), code (sell|watch|hold|unknown|skip), level (red|yellow|green|gray),\n"
             "score (0-100), reason, summary (one line for LLMs), market{price_usd, liquidity_usd, volume_24h_usd, age_hours, ...},\n"
-            "checks[] (id, value, rule, status pass|warn|fail|info), data{source, fetched_at, stale, sources_tried},\n"
+            "checks[] (id, value, status pass|warn|fail|info), data{source, fetched_at, stale, sources_tried},\n"
             "security{rugged, mint/freeze authority, lp_locked_pct, top10_holders_pct, risks[]} (RugCheck), exit{quotes[{size_usd, out_usd, loss_pct}]} (Jupiter),\n"
             "unknowns[] (non-empty = do not size a trade). Add ?deep=0 for market data only (faster).\n"
             "If code is 'unknown' (HTTP 503) wait retry_after_s and retry. Never treat output as financial advice.\n\n"
-            "GET /rules   exact thresholds and score formula\nGET /health  source status\nGET /docs    OpenAPI\n" % VERSION)
+            "GET /rules   version only (rules are private)\nGET /health  source status\nGET /docs    OpenAPI\n" % VERSION)
 
 @app.get("/check")
 def check(request: Request, mint: str = Query(default=""), deep: int = Query(default=1)):
@@ -527,9 +523,9 @@ PAGE = r"""<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#060a12">
 <title>TVibe Signal - Check before you sell</title>
-<meta name="description" content="Paste a Solana token mint. Get a clear verdict with liquidity, volume, age and every rule public. Built for people and AI agents.">
+<meta name="description" content="Paste a Solana token mint. Get a clear verdict with liquidity, volume, age and live market, security and exit data. Built for people and AI agents.">
 <meta property="og:title" content="TVibe Signal - Check before you sell">
-<meta property="og:description" content="One request, one verdict, every number public.">
+<meta property="og:description" content="One request, one verdict, live market, security and exit data.">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2322c55e'/%3E%3Cpath d='M5 17h5l3-8 5 14 3-6h6' fill='none' stroke='%23041208' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
 <style>
 :root{--bg:#060a12;--card:rgba(16,24,38,.78);--line:#1f2d40;--mut:#8fa3b8;--txt:#e8eef5;--g:#22c55e;--y:#fbbf24;--r:#f43f5e;--n:#94a3b8;--b:#60a5fa}
@@ -661,11 +657,11 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#a7f3d0}
 <main class="wrap">
  <section class="hero0"><span class="eye">SOLANA TOKEN VITALS - LIVE</span>
   <h1 class="big">Take the pulse of any token <span>before you sell.</span></h1>
-  <p>Paste a mint. Four public data sources are read in seconds and the token gets a rhythm: steady, irregular or flatline. Every rule and number is open.</p>
+  <p>Paste a mint. Four public data sources are read in seconds and the token gets a rhythm: steady, irregular or flatline. Verdict from live market, security and exit data.</p>
   <div class="mon"><canvas id="ecg"></canvas><b id="rl">STANDBY</b><em>RHYTHM = VERDICT, NOT PRICE</em></div></section>
  <section class="card chk" id="chk">
   <h2 class="ct">Check before you sell</h2>
-  <p class="sub">Paste a Solana token mint. We check liquidity, volume, age, momentum, security (RugCheck) and exit cost (Jupiter), then give you a clear verdict. Every rule and number is public.</p>
+  <p class="sub">Paste a Solana token mint. We check liquidity, volume, age, momentum, security (RugCheck) and exit cost (Jupiter), then give you a clear verdict. Verdict from live market, security and exit data.</p>
   <label for="mint">TOKEN MINT</label>
   <div class="inp"><input id="mint" placeholder="Paste token mint..." autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go"><button type="button" id="pasteBtn">Paste</button></div>
   <button type="button" class="go" id="btn">CHECK</button>
@@ -679,18 +675,18 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#a7f3d0}
  <section class="sec"><h2 class="sh">READ THE RHYTHM</h2><div class="lg4">
   <div class="lg"><svg viewBox="0 0 120 40"><path stroke="#22c55e" d="M0 22H16l4-3 4 3H38l4 4 5-20 5 26 4-10H70l4-3 4 3H120"/></svg><b style="color:#22c55e">HOLD / BUY</b><p>Liquidity, volume, security and exit cost all pass.</p></div>
   <div class="lg"><svg viewBox="0 0 120 40"><path stroke="#fbbf24" d="M0 22H10l4-3 4 3h8l3 5 4-18 4 22 3-8h12l3-3 3 3 8 0 3 6 5-24 4 20H120"/></svg><b style="color:#fbbf24">WATCH</b><p>Something is weak: volume, age, price drop, authority or exit cost.</p></div>
-  <div class="lg"><svg viewBox="0 0 120 40"><path stroke="#f43f5e" d="M0 20H120"/></svg><b style="color:#f43f5e">SELL</b><p>Rugged, almost no liquidity, or selling would cost 30%+.</p></div>
+  <div class="lg"><svg viewBox="0 0 120 40"><path stroke="#f43f5e" d="M0 20H120"/></svg><b style="color:#f43f5e">SELL</b><p>Rugged, almost no liquidity, or selling is too costly to exit.</p></div>
   <div class="lg"><svg viewBox="0 0 120 40"><path stroke="#94a3b8" stroke-dasharray="5 7" d="M0 20H120"/></svg><b style="color:#94a3b8">UNKNOWN</b><p>No data right now. No verdict is made. Retry.</p></div></div></section>
  <section class="sec"><h2 class="sh">HOW IT WORKS</h2><div class="lg4">
   <div class="lg"><div class="n">01</div><b>Paste a mint</b><p>Any Solana token address. Pasting a link that contains the mint works too.</p></div>
   <div class="lg"><div class="n">02</div><b>Four sources read it</b><p>DexScreener and GeckoTerminal (market), RugCheck (security), Jupiter (exit quotes).</p></div>
-  <div class="lg"><div class="n">03</div><b>Rules, not opinions</b><p>Fixed public thresholds decide the verdict. Each check shows value, rule and status.</p></div>
+  <div class="lg"><div class="n">03</div><b>Rules, not opinions</b><p>Fixed rules check market, security and exit cost. Each check shows value and status.</p></div>
   <div class="lg"><div class="n">04</div><b>Agents welcome</b><p>Same answer as JSON at /check. CORS open, no key, llms.txt included.</p></div></div></section>
- <details id="how"><summary>How the verdict works (public rules)</summary><div id="howBody"><p>Loading rules...</p></div></details>
+ <details id="how"><summary>How the verdict works</summary><div id="howBody"><p>Loading rules...</p></div></details>
  <details id="agent"><summary>For AI agents and developers</summary><div id="agentBody"></div></details>
  <details><summary>Honest limits</summary><p>Verdicts are heuristics from public data, not financial advice or a security audit. The numbers above are usage counters held in memory and reset when the free host restarts: they are not a track record of how accurate verdicts turned out. A Jupiter quote is not proof that a sell will succeed. Sources can be late, rate-limited or wrong; when they fail the page says so instead of guessing.</p></details>
  <div class="foot">Not financial advice. Low liquidity = hard to exit.<br>
-  <a href="https://github.com/TVibe-signal/signal-api" target="_blank" rel="noopener">GitHub</a>|<a href="/docs">API docs</a>|<a href="/stats">Stats JSON</a>|<a href="/rules">Rules JSON</a>|<a href="/health">Status</a>|<a href="/llms.txt">llms.txt</a>|<a href="https://x.com/realTVibe" target="_blank" rel="noopener">@realTVibe</a></div>
+  <a href="https://github.com/TVibe-signal/signal-api" target="_blank" rel="noopener">GitHub</a>|<a href="/docs">API docs</a>|<a href="/stats">Stats JSON</a>|<a href="/health">Status</a>|<a href="/llms.txt">llms.txt</a>|<a href="https://x.com/realTVibe" target="_blank" rel="noopener">@realTVibe</a></div>
 </main>
 <div id="toast"></div>
 <script>
@@ -794,19 +790,19 @@ $('#mint').addEventListener('keydown',function(e){if(e.key==='Enter')run(this.va
 $('#pasteBtn').addEventListener('click',async function(){
  try{var t=await navigator.clipboard.readText();$('#mint').value=t.trim();run(t)}catch(e){$('#mint').focus();toast('Long-press the box and paste')}});
 function showRules(j){
- $('#howBody').innerHTML='<p>Verdicts come from fixed public rules, checked in this order. The first rule that matches wins.</p><ol>'+j.decision_order.map(function(x){return '<li>'+esc(x.replace(/^\d+\.\s*/,''))+'</li>'}).join('')+'</ol>'
-  +'<table>'+j.thresholds.map(function(x){return '<tr><td>'+esc(x.label)+'</td><td>'+esc(x.value)+'</td></tr>'}).join('')+'</table>'
-  +'<p>'+esc(j.score)+'</p><p>'+esc(j.check_status)+'</p><p>Data sources, in order: '+esc(j.sources.join(', '))+'. Rules version '+esc(j.version)+'. Machine readable: <code>/rules</code></p>'}
+  $('#howBody').innerHTML='<p>Verdicts come from fixed rules. Details are private to prevent gaming.</p>'
+}
 function showAgent(){var o=location.origin;
  var prompt='Before you buy, sell or mention a Solana token, call GET '+o+'/check?mint=<MINT>. Read verdict, code, score, reason and checks. If code is "unknown" wait retry_after_s and retry. This is a heuristic, not financial advice.';
  $('#agentBody').innerHTML='<p>One request, one JSON verdict. No API key. CORS is open. Add <code>&deep=0</code> for market data only (faster).</p><pre>curl "'+esc(o)+'/check?mint=&lt;MINT&gt;"</pre>'
-  +'<table><tr><td><code>verdict</code> / <code>code</code></td><td>SELL, WATCH, HOLD / BUY, UNKNOWN, SKIP</td></tr><tr><td><code>level</code></td><td>red, yellow, green, gray</td></tr><tr><td><code>score</code></td><td>0-100 health score</td></tr><tr><td><code>summary</code></td><td>one line for LLMs</td></tr><tr><td><code>market</code></td><td>price, liquidity, volume, age, txns</td></tr><tr><td><code>checks[]</code></td><td>every rule with value and status</td></tr><tr><td><code>security</code></td><td>RugCheck: authorities, LP lock, holders, risks</td></tr><tr><td><code>exit</code></td><td>Jupiter sell quotes ($100, $1,000)</td></tr><tr><td><code>unknowns[]</code></td><td>missing data. Non-empty = do not size</td></tr><tr><td><code>data</code></td><td>source, age, stale, sources_tried</td></tr></table>'
+  +'<table><tr><td><code>verdict</code> / <code>code</code></td><td>SELL, WATCH, HOLD / BUY, UNKNOWN, SKIP</td></tr><tr><td><code>level</code></td><td>red, yellow, green, gray</td></tr><tr><td><code>score</code></td><td>0-100 health score</td></tr><tr><td><code>summary</code></td><td>one line for LLMs</td></tr><tr><td><code>market</code></td><td>price, liquidity, volume, age, txns</td></tr><tr><td><code>checks[]</code></td><td>every check with value and status</td></tr><tr><td><code>security</code></td><td>RugCheck: authorities, LP lock, holders, risks</td></tr><tr><td><code>exit</code></td><td>Jupiter sell quotes ($100, $1,000)</td></tr><tr><td><code>unknowns[]</code></td><td>missing data. Non-empty = do not size</td></tr><tr><td><code>data</code></td><td>source, age, stale, sources_tried</td></tr></table>'
   +'<p>HTTP 503 = no data right now, retry after the <code>Retry-After</code> header. HTTP 429 = rate limited ('+'40 per minute per IP).</p><button class="btn pri" id="cp">Copy agent prompt</button><div style="height:12px"></div>';
  $('#cp').onclick=function(){copy(prompt,'Agent prompt copied')}}
+
 async function boot(){
  drawHist();showAgent();loadStats();setInterval(loadStats,15000);
  try{var h=await (await fetch('/health')).json();var b=$('#badge');b.className='badge '+(h.status==='ok'?'ok':'bad');$('#btxt').textContent=(h.status==='ok'?'LIVE':'DEGRADED')+' - '+h.version}catch(e){}
- try{showRules(await (await fetch('/rules')).json())}catch(e){$('#howBody').innerHTML='<p>Could not load rules. Open <code>/rules</code>.</p>'}
+ try{showRules(await (await fetch('/rules')).json())}catch(e){$('#howBody').innerHTML='<p>Verdicts come from fixed rules. Details are private.</p>'}
  var q=new URLSearchParams(location.search).get('mint');if(q){$('#mint').value=q;run(q)}
 }
 var cv=$('#ecg'),cx=cv.getContext('2d'),mode='idle',W=0,H=0,RM=window.matchMedia&&matchMedia('(prefers-reduced-motion:reduce)').matches;
@@ -822,7 +818,7 @@ sz();addEventListener('resize',function(){sz();if(RM)draw(0)});requestAnimationF
 function ago(t){var s=Math.max(0,Math.floor(Date.now()/1000-t));return s<60?s+'s':s<3600?Math.floor(s/60)+'m':Math.floor(s/3600)+'h'}
 function upt(s){var h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h>=24?Math.floor(h/24)+'d '+h%24+'h':h+'h '+m+'m'}
 async function loadStats(){try{var j=await (await fetch('/stats')).json(),c=j.verdicts||{},n=j.checks,V=[['sell','SELL','#f43f5e'],['watch','WATCH','#fbbf24'],['hold','HOLD','#22c55e'],['unknown','UNKNOWN','#94a3b8']];
- $('#stats').innerHTML=[['CHECKS',n.toLocaleString()],['UNIQUE TOKENS',j.unique_tokens.toLocaleString()],['UPTIME',upt(j.uptime_s)],['MEDIAN SPEED',j.median_ms==null?'\u2014':j.median_ms+' ms'],['CACHE HIT',j.cache_hit_pct==null?'\u2014':j.cache_hit_pct+'%'],['RULES',j.rules_version]].map(function(x){return '<div class="sc"><span>'+x[0]+'</span><b>'+esc(x[1])+'</b></div>'}).join('');
+ $('#stats').innerHTML=[['CHECKS',n.toLocaleString()],['UNIQUE TOKENS',j.unique_tokens.toLocaleString()],['UPTIME',upt(j.uptime_s)],['MEDIAN SPEED',j.median_ms==null?'\u2014':j.median_ms+' ms'],['CACHE HIT',j.cache_hit_pct==null?'\u2014':j.cache_hit_pct+'%']].map(function(x){return '<div class="sc"><span>'+x[0]+'</span><b>'+esc(x[1])+'</b></div>'}).join('');
  $('#mix').innerHTML=n?V.map(function(v){return '<i style="flex:'+(c[v[0]]||0)+';background:'+v[2]+'"></i>'}).join(''):'';
  $('#mixlg').innerHTML=n?V.map(function(v){return '<span><i style="background:'+v[2]+'"></i>'+v[1]+' '+(c[v[0]]||0)+' ('+Math.round((c[v[0]]||0)/n*100)+'%)</span>'}).join(''):'No checks yet since the last restart. Be the first.';
  $('#srcs').innerHTML=Object.keys(j.sources).map(function(k){var s=j.sources[k];return '<div class="tp"><i style="background:'+(s.ok===false?'#fbbf24':s.ok?'#22c55e':'#94a3b8')+'"></i><b>'+k+'</b><span>'+(s.success_pct==null?'no calls yet':s.success_pct+'% ('+s.ok_n+'/'+(s.ok_n+s.fail_n)+')')+'</span><em>'+(s.last_error?esc(s.last_error):'')+'</em></div>'}).join('');
