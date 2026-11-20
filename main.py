@@ -134,4 +134,4 @@ async def omni(request: Request, mint: str | None = Query(default=None), view: s
 
 @app.get("/play")
 async def play(request: Request, mint: str | None = Query(default=None), view: str = Query("full")):
-    return JSONResponse(content=await omni_impl(request, mint, view), status_code=200)
+    return JSONResponse(content=await omni_impl(request, mint, view), status_code=200) 
