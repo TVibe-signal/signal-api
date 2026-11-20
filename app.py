@@ -757,7 +757,7 @@ function render(j){
   h+='<div class="chg">'+[['5M',c.m5],['1H',c.h1],['6H',c.h6],['24H',c.h24]].map(function(x){return '<div><span>'+x[0]+'</span><b class="'+cls(x[1])+'">'+fPct(x[1])+'</b></div>'}).join('')+'</div>';
   h+=pbar('Last 1h',mk.txns&&mk.txns.h1)+pbar('Last 24h',mk.txns&&mk.txns.h24);
   h+=secBlock(j)+exitBlock(j);
-  h+='<h3>WHY THIS VERDICT</h3>'+(j.checks||[]).map(function(k){return '<div class="ck '+k.status+'"><div class="ic">'+({pass:'\u2713',warn:'!',fail:'\u2715',info:'i'}[k.status])+'</div><div style="flex:1"><div class="t"><span>'+esc(k.label)+'</span><em>'+esc(k.value)+'</em></div><small>'+esc(k.note)+' Rule: '+esc(k.rule)+'</small></div></div>'}).join('');
+  h+='<h3>WHY THIS VERDICT</h3>'+(j.checks||[]).map(function(k){return '<div class="ck '+k.status+'"><div class="ic">'+({pass:'\u2713',warn:'!',fail:'\u2715',info:'i'}[k.status])+'</div><div style="flex:1"><div class="t"><span>'+esc(k.label)+'</span><em>'+esc(k.value)+'</em></div><small>'+esc(k.note)+'</small></div></div>'}).join('');
   h+='<div class="row"><button class="btn pri" data-act="verdict">Copy verdict</button><button class="btn" data-act="json">Copy JSON for agent</button><button class="btn" data-act="share">Share link</button>'+(mk.pair_url?'<a class="btn" href="'+esc(mk.pair_url)+'" target="_blank" rel="noopener">Open chart</a>':'<span></span>')+'</div>';
  }
  h+='<details style="margin-top:14px"><summary>FOR AGENT - Raw JSON</summary><pre>'+hl(j)+'</pre></details>';
