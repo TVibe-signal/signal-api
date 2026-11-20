@@ -201,9 +201,11 @@ def jup_quote(m, price, dec, size):
     return {"size_usd": size, "out_usd": round(got, 2), "loss_pct": round((1 - got / size) * 100, 2), "route_hops": len(d.get("routePlan") or [])}
 
 SOURCES = (("dexscreener", src_dex), ("geckoterminal", src_gecko))
+SRC_N = {n: [0, 0] for n in ("dexscreener", "geckoterminal", "rugcheck", "jupiter")}
 SRC_STATE = {n: {"ok": None, "last_ok_at": None, "last_error": None} for n in ("dexscreener", "geckoterminal", "rugcheck", "jupiter")}
 
 def mark(name, ok, err=None):
+    SRC_N[name][0 if ok else 1] += 1
     SRC_STATE[name].update(ok=ok, last_error=err)
     if ok:
         SRC_STATE[name]["last_ok_at"] = iso()
@@ -214,12 +216,14 @@ def fetch_market(m):
         try:
             res = fn(m)
             tried.append({"name": name, "ok": True, "pairs": len(res)})
+            SRC_N[name][0] += 1
             SRC_STATE[name].update(ok=True, last_ok_at=iso(), last_error=None)
             if res:
                 pairs, used = res, name
                 break
         except Exception as e:
             tried.append({"name": name, "ok": False, "error": str(e)})
+            SRC_N[name][1] += 1
             SRC_STATE[name].update(ok=False, last_error=str(e))
     return pairs, used, tried
 
@@ -404,6 +408,27 @@ def evaluate(m, deep=True):
         ex.shutdown(wait=False)
 
 _cache, _lock, _hits = {}, threading.Lock(), {}
+ST = {"checks": 0, "mints": set(), "codes": {}, "hits": 0, "ms": [], "tape": []}
+
+def log_check(res, ms):
+    with _lock:
+        ST["checks"] += 1
+        ST["mints"].add(res["mint"])
+        ST["codes"][res["code"]] = ST["codes"].get(res["code"], 0) + 1
+        ST["hits"] += 1 if res["data"].get("cached") else 0
+        ST["ms"] = (ST["ms"] + [ms])[-200:]
+        ST["tape"] = ([{"mint": res["mint"], "symbol": res.get("symbol"), "verdict": res["verdict"], "code": res["code"],
+                        "score": res.get("score"), "t": int(time.time())}] + ST["tape"])[:10]
+
+@app.get("/stats")
+def stats():
+    n, ms = ST["checks"], sorted(ST["ms"])
+    srcs = {k: {"ok": SRC_STATE[k]["ok"], "ok_n": v[0], "fail_n": v[1], "success_pct": round(100.0 * v[0] / (v[0] + v[1])) if v[0] + v[1] else None,
+                "last_error": SRC_STATE[k]["last_error"]} for k, v in SRC_N.items()}
+    return {"version": VERSION, "rules_version": RULES_VERSION, "since": iso(STARTED), "uptime_s": int(time.time() - STARTED), "checks": n,
+            "unique_tokens": len(ST["mints"]), "verdicts": dict(ST["codes"]), "cache_hit_pct": round(100.0 * ST["hits"] / n) if n else None,
+            "median_ms": ms[len(ms) // 2] if ms else None, "sources": srcs, "tape": ST["tape"],
+            "note": "In-memory counters since the last restart of the free host. This is usage, not a track record of verdict accuracy."}
 
 def cached_evaluate(m, deep=True):
     now = time.time()
@@ -486,7 +511,9 @@ def check(request: Request, mint: str = Query(default=""), deep: int = Query(def
     if m == SOL_MINT:
         res = shell(m, "SKIP", "skip", "gray", "SOL is the base currency, not a pump token. Paste a real token mint.", [], symbol="SOL", name="Solana")
         return JSONResponse(res, headers={"Cache-Control": "no-store"})
+    t0 = time.time()
     res = cached_evaluate(m, bool(deep))
+    log_check(res, int((time.time() - t0) * 1000))
     if res["code"] == "unknown":
         return JSONResponse(res, status_code=503, headers={"Retry-After": "8", "Cache-Control": "no-store"})
     return JSONResponse(res, headers={"Cache-Control": "no-store", "X-Data-Source": str(res["data"]["source"])})
@@ -513,8 +540,8 @@ body{margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,sans-s
 .bg:before,.bg:after{content:"";position:absolute;width:420px;height:420px;border-radius:50%;filter:blur(90px);opacity:.28;animation:float 18s ease-in-out infinite}
 .bg:before{background:#22c55e;left:-120px;top:20%}.bg:after{background:#3b82f6;right:-140px;top:55%;animation-delay:-9s}
 @keyframes float{50%{transform:translate(40px,-50px) scale(1.15)}}
-.wrap{max-width:640px;margin:0 auto}
-.top{max-width:640px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;padding:8px 2px 16px}
+.wrap{max-width:1040px;margin:0 auto}
+.top{max-width:1040px;margin:0 auto;display:flex;justify-content:space-between;align-items:center;padding:8px 2px 16px}
 .logo{display:flex;align-items:center;gap:10px;font-weight:800;font-size:20px;letter-spacing:.01em}
 .logo i{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,#22c55e,#16a34a);display:grid;place-items:center;box-shadow:0 0 22px rgba(34,197,94,.45)}
 .badge{display:flex;align-items:center;gap:7px;font-size:12px;font-weight:700;background:#0f1b2b;color:var(--mut);border:1px solid var(--line);padding:6px 11px;border-radius:999px}
@@ -602,6 +629,27 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#a7f3d0}
 .foot{text-align:center;color:#6b7f95;font-size:12px;margin-top:20px}.foot a{color:var(--mut);margin:0 6px}
 #toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,30px);background:#0f2a1b;border:1px solid #1e5a38;color:#bbf7d0;padding:10px 16px;border-radius:12px;font-weight:700;font-size:13px;opacity:0;pointer-events:none;transition:.25s;z-index:9}
 #toast.on{opacity:1;transform:translate(-50%,0)}
+.hero0{text-align:center;padding:22px 0 10px}
+.eye{display:inline-block;font:700 11px ui-monospace,Menlo,monospace;letter-spacing:.2em;color:#4ade80;border:1px solid #1e5a38;border-radius:99px;padding:6px 14px;background:rgba(34,197,94,.07)}
+.big{font-size:clamp(34px,7vw,66px);line-height:1.02;margin:14px 0 12px;letter-spacing:-.035em;font-weight:900}
+.big span{background:linear-gradient(90deg,#4ade80,#22d3ee);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero0 p{color:var(--mut);max-width:620px;margin:0 auto;font-size:15px}
+.mon{position:relative;margin:22px auto 8px;max-width:920px;height:160px;border:1px solid #16352a;border-radius:22px;overflow:hidden;background:repeating-linear-gradient(0deg,rgba(34,197,94,.06) 0 1px,transparent 1px 26px),repeating-linear-gradient(90deg,rgba(34,197,94,.06) 0 1px,transparent 1px 26px),#040a10;box-shadow:inset 0 0 70px rgba(34,197,94,.09),0 0 50px rgba(34,197,94,.08)}
+#ecg{position:absolute;inset:0;width:100%;height:100%;-webkit-mask-image:linear-gradient(90deg,transparent,#000 10%,#000 90%,transparent);mask-image:linear-gradient(90deg,transparent,#000 10%,#000 90%,transparent)}
+.mon b,.mon em{position:absolute;top:12px;font:700 11px ui-monospace,Menlo,monospace;letter-spacing:.14em;font-style:normal}.mon b{left:16px}.mon em{right:16px;color:#4b6a5b}
+.chk{max-width:700px;margin:0 auto 18px}.ct{font-size:20px;margin:0 0 6px}
+.sec{margin:34px 0}.sh{font:800 12px ui-monospace,Menlo,monospace;letter-spacing:.2em;color:var(--mut);margin:0 0 14px}.sh i{font-weight:500;letter-spacing:.04em;color:#5f738a;margin-left:8px;font-style:normal}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.sc{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px}.sc span{display:block;font:700 10.5px ui-monospace,Menlo,monospace;letter-spacing:.14em;color:var(--mut)}.sc b{display:block;font:800 24px ui-monospace,Menlo,monospace;margin-top:4px;color:#e8fff1}
+.mix{display:flex;height:10px;border-radius:99px;overflow:hidden;background:#16243a;margin-top:14px;gap:2px}.mix i{display:block}
+.mixlg{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:12px;color:var(--mut);margin-top:8px}.mixlg i{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:6px}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin-top:14px}
+.box{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:14px 16px}.box h4{margin:0 0 6px;font:800 11px ui-monospace,Menlo,monospace;letter-spacing:.16em;color:var(--mut)}
+.tp{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid #16243a;font-size:13px}.tp:first-of-type{border-top:0}.tp[data-m]{cursor:pointer}
+.tp i{flex:none;width:8px;height:8px;border-radius:50%}.tp b{flex:none}.tp span{color:var(--mut);flex:1}.tp em{font-style:normal;color:#6b7f95;font-size:11px;max-width:45%;text-align:right;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lg4{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+.lg{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:16px}.lg svg{width:100%;height:40px}.lg svg path{fill:none;stroke-width:2.4;stroke-linejoin:round;stroke-linecap:round}
+.lg b{display:block;font-size:16px;margin:8px 0 4px}.lg p{margin:0;font-size:13px;color:var(--mut)}.lg .n{font:900 30px ui-monospace,Menlo,monospace;color:#1f3a2c}
 @media(max-width:380px){.hero{flex-direction:column;text-align:center}.vt{font-size:30px}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 </style></head><body>
@@ -611,8 +659,12 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#a7f3d0}
  <div class="badge" id="badge"><span class="dot"></span><span id="btxt">LIVE - __V__</span></div>
 </header>
 <main class="wrap">
- <section class="card">
-  <h1>Check before you sell</h1>
+ <section class="hero0"><span class="eye">SOLANA TOKEN VITALS - LIVE</span>
+  <h1 class="big">Take the pulse of any token <span>before you sell.</span></h1>
+  <p>Paste a mint. Four public data sources are read in seconds and the token gets a rhythm: steady, irregular or flatline. Every rule and number is open.</p>
+  <div class="mon"><canvas id="ecg"></canvas><b id="rl">STANDBY</b><em>RHYTHM = VERDICT, NOT PRICE</em></div></section>
+ <section class="card chk" id="chk">
+  <h2 class="ct">Check before you sell</h2>
   <p class="sub">Paste a Solana token mint. We check liquidity, volume, age, momentum, security (RugCheck) and exit cost (Jupiter), then give you a clear verdict. Every rule and number is public.</p>
   <label for="mint">TOKEN MINT</label>
   <div class="inp"><input id="mint" placeholder="Paste token mint..." autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="go"><button type="button" id="pasteBtn">Paste</button></div>
@@ -621,10 +673,24 @@ code{font-family:ui-monospace,Menlo,monospace;font-size:12px;color:#a7f3d0}
   <div id="msg">Paste a mint, then press CHECK.</div>
   <div id="out"></div>
  </section>
+<section class="sec"><h2 class="sh">LIVE NUMBERS <i>counted by this server since its last restart</i></h2>
+  <div class="stats" id="stats"></div><div class="mix" id="mix"></div><div class="mixlg" id="mixlg"></div>
+  <div class="two"><div class="box"><h4>DATA SOURCES (SUCCESS RATE)</h4><div id="srcs"></div></div><div class="box"><h4>LIVE TAPE (TAP TO RE-CHECK)</h4><div id="tape"></div></div></div></section>
+ <section class="sec"><h2 class="sh">READ THE RHYTHM</h2><div class="lg4">
+  <div class="lg"><svg viewBox="0 0 120 40"><path stroke="#22c55e" d="M0 22H16l4-3 4 3H38l4 4 5-20 5 26 4-10H70l4-3 4 3H120"/></svg><b style="color:#22c55e">HOLD / BUY</b><p>Liquidity, volume, security and exit cost all pass.</p></div>
+  <div class="lg"><svg viewBox="0 0 120 40"><path stroke="#fbbf24" d="M0 22H10l4-3 4 3h8l3 5 4-18 4 22 3-8h12l3-3 3 3 8 0 3 6 5-24 4 20H120"/></svg><b style="color:#fbbf24">WATCH</b><p>Something is weak: volume, age, price drop, authority or exit cost.</p></div>
+  <div class="lg"><svg viewBox="0 0 120 40"><path stroke="#f43f5e" d="M0 20H120"/></svg><b style="color:#f43f5e">SELL</b><p>Rugged, almost no liquidity, or selling would cost 30%+.</p></div>
+  <div class="lg"><svg viewBox="0 0 120 40"><path stroke="#94a3b8" stroke-dasharray="5 7" d="M0 20H120"/></svg><b style="color:#94a3b8">UNKNOWN</b><p>No data right now. No verdict is made. Retry.</p></div></div></section>
+ <section class="sec"><h2 class="sh">HOW IT WORKS</h2><div class="lg4">
+  <div class="lg"><div class="n">01</div><b>Paste a mint</b><p>Any Solana token address. Pasting a link that contains the mint works too.</p></div>
+  <div class="lg"><div class="n">02</div><b>Four sources read it</b><p>DexScreener and GeckoTerminal (market), RugCheck (security), Jupiter (exit quotes).</p></div>
+  <div class="lg"><div class="n">03</div><b>Rules, not opinions</b><p>Fixed public thresholds decide the verdict. Each check shows value, rule and status.</p></div>
+  <div class="lg"><div class="n">04</div><b>Agents welcome</b><p>Same answer as JSON at /check. CORS open, no key, llms.txt included.</p></div></div></section>
  <details id="how"><summary>How the verdict works (public rules)</summary><div id="howBody"><p>Loading rules...</p></div></details>
  <details id="agent"><summary>For AI agents and developers</summary><div id="agentBody"></div></details>
+ <details><summary>Honest limits</summary><p>Verdicts are heuristics from public data, not financial advice or a security audit. The numbers above are usage counters held in memory and reset when the free host restarts: they are not a track record of how accurate verdicts turned out. A Jupiter quote is not proof that a sell will succeed. Sources can be late, rate-limited or wrong; when they fail the page says so instead of guessing.</p></details>
  <div class="foot">Not financial advice. Low liquidity = hard to exit.<br>
-  <a href="/docs">API docs</a>|<a href="/rules">Rules JSON</a>|<a href="/health">Status</a>|<a href="/llms.txt">llms.txt</a>|<a href="https://x.com/realTVibe" target="_blank" rel="noopener">@realTVibe</a></div>
+  <a href="https://github.com/TVibe-signal/signal-api" target="_blank" rel="noopener">GitHub</a>|<a href="/docs">API docs</a>|<a href="/stats">Stats JSON</a>|<a href="/rules">Rules JSON</a>|<a href="/health">Status</a>|<a href="/llms.txt">llms.txt</a>|<a href="https://x.com/realTVibe" target="_blank" rel="noopener">@realTVibe</a></div>
 </main>
 <div id="toast"></div>
 <script>
@@ -668,7 +734,7 @@ function exitBlock(j){var e=j.exit;
 function pbar(l,t){if(!t)return '';var tot=t.buys+t.sells;if(!tot)return '';var bp=Math.round(t.buys/tot*100);
  return '<div class="pb"><div class="pl"><span>'+l+'</span><span>'+t.buys.toLocaleString()+' buys / '+t.sells.toLocaleString()+' sells</span></div><div class="bar"><i style="width:'+bp+'%"></i></div></div>'}
 function render(j){
- var mk=j.market,d=j.data||{},L=j.level||'gray',C=2*Math.PI*52,h='';
+ setRhythm(j.code);var mk=j.market,d=j.data||{},L=j.level||'gray',C=2*Math.PI*52,h='';
  if(d.stale)h+='<div class="banner">Live sources are rate-limited. Showing the last known data from '+d.age_s+'s ago.</div>';
  h+='<div class="hero '+L+'"><div class="ring"><svg viewBox="0 0 120 120"><circle class="rt" cx="60" cy="60" r="52"/><circle class="rf" id="rf" cx="60" cy="60" r="52" stroke-dasharray="'+C+'" stroke-dashoffset="'+C+'" transform="rotate(-90 60 60)"/></svg><div class="rn"><b>'+(j.score==null?'?':j.score)+'</b><span>SCORE</span></div></div>';
  h+='<div><div class="vk">VERDICT</div><div class="vt">'+esc(j.verdict)+'</div><div class="va">'+esc(j.action)+'</div>';
@@ -716,7 +782,7 @@ async function run(raw,auto){
 }
 document.addEventListener('click',function(e){
  var t=e.target.closest('[data-act],[data-m]');if(!t)return;
- if(t.dataset.m){$('#mint').value=t.dataset.m;run(t.dataset.m);return}
+ if(t.dataset.m){$('#mint').value=t.dataset.m;$('#chk').scrollIntoView({behavior:'smooth'});run(t.dataset.m);return}
  var a=t.dataset.act;if(!last)return;
  if(a==='verdict')copy(last.summary,'Verdict copied');
  else if(a==='json')copy(JSON.stringify(last),'JSON copied for agent');
@@ -738,10 +804,28 @@ function showAgent(){var o=location.origin;
   +'<p>HTTP 503 = no data right now, retry after the <code>Retry-After</code> header. HTTP 429 = rate limited ('+'40 per minute per IP).</p><button class="btn pri" id="cp">Copy agent prompt</button><div style="height:12px"></div>';
  $('#cp').onclick=function(){copy(prompt,'Agent prompt copied')}}
 async function boot(){
- drawHist();showAgent();
+ drawHist();showAgent();loadStats();setInterval(loadStats,15000);
  try{var h=await (await fetch('/health')).json();var b=$('#badge');b.className='badge '+(h.status==='ok'?'ok':'bad');$('#btxt').textContent=(h.status==='ok'?'LIVE':'DEGRADED')+' - '+h.version}catch(e){}
  try{showRules(await (await fetch('/rules')).json())}catch(e){$('#howBody').innerHTML='<p>Could not load rules. Open <code>/rules</code>.</p>'}
  var q=new URLSearchParams(location.search).get('mint');if(q){$('#mint').value=q;run(q)}
 }
+var cv=$('#ecg'),cx=cv.getContext('2d'),mode='idle',W=0,H=0,RM=window.matchMedia&&matchMedia('(prefers-reduced-motion:reduce)').matches;
+var CLR={idle:'#22c55e',hold:'#22c55e',watch:'#fbbf24',sell:'#f43f5e',unknown:'#94a3b8',skip:'#94a3b8'},LB={idle:'STANDBY',hold:'STEADY - HOLD / BUY',watch:'IRREGULAR - WATCH',sell:'FLATLINE - SELL',unknown:'NO SIGNAL - UNKNOWN',skip:'N/A'};
+function setRhythm(c){mode=CLR[c]?c:'idle';var l=$('#rl');l.textContent=LB[mode];l.style.color=CLR[mode];if(RM)draw(0)}
+function sz(){var r=cv.getBoundingClientRect(),d=window.devicePixelRatio||1;W=r.width;H=r.height;cv.width=W*d;cv.height=H*d;cx.setTransform(d,0,0,d,0,0)}
+function beat(p){p=p-Math.floor(p);if(p>.1&&p<.18)return .14*Math.sin((p-.1)/.08*Math.PI);if(p>=.28&&p<.31)return -.18*(p-.28)/.03;if(p>=.31&&p<.34)return -.18+1.18*(p-.31)/.03;if(p>=.34&&p<.38)return 1-1.4*(p-.34)/.04;if(p>=.38&&p<.41)return -.4+.4*(p-.38)/.03;if(p>.52&&p<.7)return .24*Math.sin((p-.52)/.18*Math.PI);return 0}
+function draw(ts){var m=mode,c=CLR[m],s=ts/1000*(m==='watch'?150:110);cx.clearRect(0,0,W,H);cx.lineWidth=2.4;cx.strokeStyle=c;cx.shadowColor=c;cx.shadowBlur=14;cx.setLineDash(m==='unknown'||m==='skip'?[6,9]:[]);cx.beginPath();
+ for(var x=0;x<=W;x+=2){var y=0,u=x+s;if(m==='idle'||m==='hold')y=beat(u/(m==='hold'?230:340));else if(m==='watch')y=beat(u/200+.35*Math.sin(u/130))*(.55+.45*Math.sin(u/90));else if(m==='sell')y=.015*Math.sin(x*.9+ts/50);
+  var yy=H/2-y*H*.36;x?cx.lineTo(x,yy):cx.moveTo(x,yy)}
+ cx.stroke();if(!RM)requestAnimationFrame(draw)}
+sz();addEventListener('resize',function(){sz();if(RM)draw(0)});requestAnimationFrame(draw);
+function ago(t){var s=Math.max(0,Math.floor(Date.now()/1000-t));return s<60?s+'s':s<3600?Math.floor(s/60)+'m':Math.floor(s/3600)+'h'}
+function upt(s){var h=Math.floor(s/3600),m=Math.floor(s%3600/60);return h>=24?Math.floor(h/24)+'d '+h%24+'h':h+'h '+m+'m'}
+async function loadStats(){try{var j=await (await fetch('/stats')).json(),c=j.verdicts||{},n=j.checks,V=[['sell','SELL','#f43f5e'],['watch','WATCH','#fbbf24'],['hold','HOLD','#22c55e'],['unknown','UNKNOWN','#94a3b8']];
+ $('#stats').innerHTML=[['CHECKS',n.toLocaleString()],['UNIQUE TOKENS',j.unique_tokens.toLocaleString()],['UPTIME',upt(j.uptime_s)],['MEDIAN SPEED',j.median_ms==null?'\u2014':j.median_ms+' ms'],['CACHE HIT',j.cache_hit_pct==null?'\u2014':j.cache_hit_pct+'%'],['RULES',j.rules_version]].map(function(x){return '<div class="sc"><span>'+x[0]+'</span><b>'+esc(x[1])+'</b></div>'}).join('');
+ $('#mix').innerHTML=n?V.map(function(v){return '<i style="flex:'+(c[v[0]]||0)+';background:'+v[2]+'"></i>'}).join(''):'';
+ $('#mixlg').innerHTML=n?V.map(function(v){return '<span><i style="background:'+v[2]+'"></i>'+v[1]+' '+(c[v[0]]||0)+' ('+Math.round((c[v[0]]||0)/n*100)+'%)</span>'}).join(''):'No checks yet since the last restart. Be the first.';
+ $('#srcs').innerHTML=Object.keys(j.sources).map(function(k){var s=j.sources[k];return '<div class="tp"><i style="background:'+(s.ok===false?'#fbbf24':s.ok?'#22c55e':'#94a3b8')+'"></i><b>'+k+'</b><span>'+(s.success_pct==null?'no calls yet':s.success_pct+'% ('+s.ok_n+'/'+(s.ok_n+s.fail_n)+')')+'</span><em>'+(s.last_error?esc(s.last_error):'')+'</em></div>'}).join('');
+ $('#tape').innerHTML=j.tape.length?j.tape.map(function(t){return '<div class="tp" data-m="'+esc(t.mint)+'"><i style="background:'+(LV[{sell:'red',watch:'yellow',hold:'green'}[t.code]||'gray'])+'"></i><b>'+esc(t.symbol||t.mint.slice(0,4)+'...'+t.mint.slice(-4))+'</b><span>'+esc(t.verdict)+(t.score!=null?' - '+t.score:'')+'</span><em>'+ago(t.t)+'</em></div>'}).join(''):'<div class="note">No checks yet.</div>'}catch(e){}}
 boot();
 </script></body></html>""".replace("__V__", VERSION)
