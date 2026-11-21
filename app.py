@@ -312,3 +312,37 @@ globals()["app"] = app
 
 _ver = g.get("VERSION") or getattr(app, "version", "?")
 print(f"[loader] ready entry=app:app version={_ver} routes~={len(getattr(app, 'routes', []) or [])}")
+
+# --- FIX: / was 404 (patch_live_fix v34-mini replaced / with FALLBACK) ---
+# Remove broken / route and restore a working home that always returns 200.
+try:
+    _routes = getattr(app, "routes", []) or []
+    _before = len(_routes)
+    # FastAPI: app.routes == app.router.routes, removing from router is enough
+    try:
+        app.router.routes = [r for r in app.router.routes if getattr(r, "path", "") != "/"]
+    except Exception:
+        pass
+    # If app.routes is a separate list, clean it too
+    try:
+        if getattr(app, "routes", None) is not app.router.routes:
+            app.routes = [r for r in app.routes if getattr(r, "path", "") != "/"]
+    except Exception:
+        pass
+    from fastapi.responses import HTMLResponse as _HTMLResponse
+    @app.get("/")
+    def _home_fix():
+        return _HTMLResponse(
+            "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+            "<title>TVibe Signal</title>"
+            "<style>body{background:#FFF6C9;font-family:system-ui;padding:20px;color:#222}input{padding:10px;width:78%;border-radius:10px;border:1px solid #ddd}a,button{background:#111;color:#fff;padding:10px 14px;border-radius:10px;text-decoration:none;border:0}.card{background:#fff;border-radius:16px;padding:16px;margin:14px 0}</style></head>"
+            "<body><h1>TVibe Signal</h1><p>Check a Solana token before you buy. PASS does not mean safe.</p>"
+            "<div class='card'><h3>Check token</h3><form action='/pro' method='get'><input name='mint' placeholder='Paste Solana mint'><button>Check PRO</button></form>"
+            "<p style='font-size:13px'>Example: paste mint, then see Grade + Holder / LP / Dev.</p></div>"
+            "<div class='card'><h3>Quick links</h3><p><a href='/pro_status'>Pro Status</a> &nbsp; <a href='/health'>Health</a> &nbsp; <a href='/play'>Playground</a> &nbsp; <a href='/pro'>PRO</a></p>"
+            "<p style='font-size:13px'>Agent JSON: /pro_json?mint=... &nbsp; Compare: /compare?mint1=...&mint2=...</p></div>"
+            "<p style='font-size:12px;color:#7A6A55'>PASS does not mean safe. Always check yourself.</p></body></html>"
+        )
+    print(f"[fix] / restored 200 (removed {_before - len(getattr(app,'routes',[]) or [])} broken / route(s))")
+except Exception as _e:
+    print(f"[fix] / NOT restored: {_e}")
