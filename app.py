@@ -319,52 +319,78 @@ try:
     from fastapi.responses import HTMLResponse as _HTMLResponse2
     _HOME_HTML2 = ("""
 <!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
-<title>TVibe Signal - Check Solana Token</title>
+<title>TVibe - Check a token before you buy</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#FFF6C9;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#222;padding:0 0 40px}
-.wrap{max-width:860px;margin:0 auto;padding:18px 14px}
-.header{display:flex;align-items:center;gap:12px}.logo{width:52px;height:52px;background:#111;color:#fff;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:28px;transform:rotate(-4deg)}
-h1{margin:0;font-size:32px;letter-spacing:-0.5px}.sub{color:#6b5d3f;margin:6px 0 14px;font-size:14px}
-.stage{background:#fff;border-radius:20px;padding:14px 14px 8px;overflow:hidden;position:relative;box-shadow:0 6px 20px rgba(0,0,0,.06);border:2px solid #ffe9a8}
-.stage-title{font-weight:800;font-size:13px;letter-spacing:.6px;color:#8a7a4a}
-.track{position:relative;height:110px;margin-top:8px;overflow:hidden;background:#FFF6C9;border-radius:14px}
-.runner{position:absolute;bottom:12px;left:-80px;animation:run 14s linear infinite}
-.blob{width:56px;height:56px;border-radius:50% 50% 46% 54%;display:flex;align-items:center;justify-content:center;flex-direction:column;animation:jump .7s ease-in-out infinite alternate;box-shadow:inset -6px -6px 0 rgba(0,0,0,.06)}
-.eyes{display:flex;gap:8px}.eye{width:8px;height:9px;background:#111;border-radius:50%}.mouth{width:14px;height:7px;border:2px solid #111;border-top:0;border-radius:0 0 12px 12px;margin-top:3px}
-.b1{background:#FF9AA2}.b2{background:#FFD6A5}.b3{background:#FDFFB6}.b4{background:#CAFFBF}.b5{background:#9BF6FF}.b6{background:#BDB2FF}.b7{background:#FFC6FF}
-.r1{animation-delay:0s}.r1 .blob{animation-delay:0s}
-.r2{animation-delay:1.8s}.r2 .blob{animation-delay:.1s}
-.r3{animation-delay:3.6s}.r3 .blob{animation-delay:.2s}
-.r4{animation-delay:5.4s}.r4 .blob{animation-delay:.3s}
-.r5{animation-delay:7.2s}.r5 .blob{animation-delay:.4s}
-.r6{animation-delay:9s}.r6 .blob{animation-delay:.5s}
-.r7{animation-delay:10.8s}.r7 .blob{animation-delay:.6s}
-@keyframes run{0%{left:-80px;transform:rotate(0)}45%{left:88%}50%{left:88%;transform:rotate(0)}55%{left:88%}100%{left:-80px;transform:rotate(-360deg)}}
-@keyframes jump{from{transform:translateY(0) scale(1,1)}to{transform:translateY(-18px) scale(.96,1.05)}}
-.card{background:#fff;border-radius:20px;padding:16px;margin:14px 0;box-shadow:0 6px 20px rgba(0,0,0,.06);border:2px solid #ffe9a8}
-.card h3{margin:0 0 10px}.row{display:flex;gap:8px}input{flex:1;padding:12px;border-radius:12px;border:1.5px solid #eee;font-size:15px;outline:none}input:focus{border-color:#111}
+*{box-sizing:border-box}body{margin:0;background:#FFF8E6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#1a1a1a}
+a{color:inherit}.top{max-width:1080px;margin:0 auto;padding:14px 16px;display:flex;align-items:center;justify-content:space-between}
+.logo{font-weight:900;font-size:22px;letter-spacing:-.5px}.logo span{color:#FF5A5A}.nav{display:flex;gap:18px;font-size:13px;color:#555}.nav a{text-decoration:none}
+.hero{max-width:1080px;margin:0 auto;padding:10px 16px 0;display:grid;grid-template-columns:1.05fr .95fr;gap:18px;align-items:start}
+h1{font-size:48px;line-height:1.02;margin:10px 0 10px;letter-spacing:-1.5px}.sub{color:#555;font-size:15px;line-height:1.6;margin:0 0 12px}
+.pills{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.pill{font-size:12px;background:#fff;border:1px solid #eee;border-radius:999px;padding:6px 10px}
+.card{background:#fff;border-radius:18px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.06);border:1px solid #f0e6c8}
+.card h3{margin:0 0 10px}.row{display:flex;gap:8px}input{flex:1;padding:12px;border-radius:12px;border:1.5px solid #eee;font-size:14px;outline:none}input:focus{border-color:#111}
 button{background:#111;color:#fff;border:0;padding:12px 16px;border-radius:12px;font-weight:800;cursor:pointer}
-.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.pill{background:#111;color:#fff;padding:9px 13px;border-radius:999px;text-decoration:none;font-size:13px;font-weight:700}.pill.light{background:#FFF6C9;color:#111;border:1.5px solid #111}
-.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}.feat{background:#FFF6C9;border-radius:16px;padding:12px}.feat b{font-size:14px}.feat p{margin:6px 0 0;font-size:12.5px;color:#6b5d3f;line-height:1.5}
-.note{font-size:12px;color:#8a7a4a;text-align:center;margin-top:10px}
-@media(max-width:520px){.grid{grid-template-columns:1fr}h1{font-size:26px}}
+.ex{font-size:12px;color:#777;margin:10px 0 0}.try{display:flex;gap:8px;margin-top:10px}.try a{font-size:12px;background:#FFF6C9;border:1px solid #eee;border-radius:999px;padding:6px 10px;text-decoration:none}
+.blobbox{background:#FFF6C9;border-radius:20px;padding:16px;position:relative;overflow:hidden}
+.pile{position:relative;height:260px}.pile-blob{position:absolute;border-radius:50% 50% 46% 54%;display:flex;align-items:center;justify-content:center;flex-direction:column;box-shadow:inset -6px -6px 0 rgba(0,0,0,.05)}
+.eyes{display:flex;gap:7px}.eye{width:7px;height:8px;background:#111;border-radius:50%}.mouth{width:12px;height:6px;border:2px solid #111;border-top:0;border-radius:0 0 10px 10px;margin-top:2px}
+.verdict{margin-top:12px;background:#111;color:#fff;border-radius:999px;padding:8px 12px;font-size:12px;font-weight:800;text-align:center;letter-spacing:.4px}
+.three{max-width:1080px;margin:16px auto 0;padding:0 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.mini{background:#fff;border-radius:16px;padding:14px;border:1px solid #f0e6c8}.mini b{font-size:14px}.mini p{margin:6px 0 0;font-size:13px;color:#666;line-height:1.5}
+.how{max-width:1080px;margin:16px auto 0;padding:0 16px}.how-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:10px}
+.agents{max-width:1080px;margin:16px auto 0;padding:0 16px}.code{background:#111;color:#E8FFB0;border-radius:14px;padding:14px;font-family:ui-monospace,monospace;font-size:12.5px;line-height:1.6;overflow:auto;white-space:pre}
+.foot{max-width:1080px;margin:16px auto 0;padding:0 16px 90px;display:flex;justify-content:space-between;font-size:12px;color:#888}
+.track{position:fixed;left:0;right:0;bottom:0;height:64px;background:transparent;pointer-events:none;overflow:hidden;z-index:50}
+.runner{position:absolute;bottom:8px;left:-80px;animation:run 16s linear infinite}.rblob{width:46px;height:46px;border-radius:50% 50% 46% 54%;display:flex;align-items:center;justify-content:center;flex-direction:column;animation:jump .6s ease-in-out infinite alternate}
+@keyframes run{from{left:-80px}to{left:110%}}
+@keyframes jump{from{transform:translateY(0)}to{transform:translateY(-14px)}}
+@media(max-width:760px){.hero{grid-template-columns:1fr}h1{font-size:36px}.three,.how-grid{grid-template-columns:1fr}.nav{display:none}}
 </style></head>
-<body><div class='wrap'>
-<div class='header'><div class='logo'>&#9679;</div><div><h1>TVibe Signal</h1><div class='sub'>Check a Solana token before you buy. PASS does not mean safe.</div></div></div>
-<div class='stage'><div class='stage-title'>7 FRIENDS ON PATROL - THEY CHECK, YOU DECIDE</div><div class='track'>
-<div class='runner r1'><div class='blob b1'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
-<div class='runner r2'><div class='blob b2'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
-<div class='runner r3'><div class='blob b3'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
-<div class='runner r4'><div class='blob b4'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
-<div class='runner r5'><div class='blob b5'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
-<div class='runner r6'><div class='blob b6'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
-<div class='runner r7'><div class='blob b7'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
-</div></div>
-<div class='card'><h3>Check token</h3><form action='/pro' method='get' class='row'><input name='mint' placeholder='Paste Solana mint'><button>Check PRO</button></form><p style='font-size:13px;color:#6b5d3f'>Paste mint, then see Grade + Holder / LP / Dev. Example: try a token you know.</p><div class='pills'><a class='pill' href='/pro'>PRO</a><a class='pill' href='/pro_status'>Pro Status</a><a class='pill' href='/health'>Health</a><a class='pill light' href='/play'>Playground</a></div></div>
-<div class='card'><h3>What PRO checks</h3><div class='grid'><div class='feat'><b>Holder & Top holder</b><p>Who holds most? Top 1% + Top 10% + concentration. Bundle risk if one wallet holds too much.</p></div><div class='feat'><b>LP Lock</b><p>Is liquidity locked / burned? Unlocked LP = dev can pull.</p></div><div class='feat'><b>Dev & Authority</b><p>Creator, dev holds, mint / freeze authority still on or revoked?</p></div><div class='feat'><b>Grade A-F</b><p>One grade + 5 breakdowns: Market / Holder / LP / Dev / Authority. No hidden thresholds.</p></div></div><div class='pills'><a class='pill light' href='/compare'>Compare 2 tokens</a><a class='pill light' href='/batch'>Batch 5 tokens</a><a class='pill light' href='/pro_json'>Agent JSON</a></div></div>
-<div class='note'>PASS does not mean safe. Always check yourself. &bull; TVibe Signal</div>
-</div></body></html>
+<body>
+<div class='top'><div class='logo'>TVibe<span>.</span></div><div class='nav'><a href='#how'>How it works</a><a href='#what'>What we check</a><a href='#agents'>For Agents</a></div></div>
+<div class='hero'>
+<div><div style='font-size:11px;letter-spacing:1px;color:#888'>SOLANA TOKEN CHECK - REAL NUMBERS, NO HYPE</div><h1>Check a token<br>before you buy.</h1><p class='sub'>Paste a Solana mint. Get a clear verdict - <b>PASS / HOLD-BUY / SELL</b> - plus real price, liquidity, volume and risk in seconds. No hype. No guess.</p><div class='pills'><span class='pill'>English only</span><span class='pill'>Agent-ready JSON</span></div>
+<div class='card'><h3>Check a token</h3><form action='/pro' method='get' class='row'><input name='mint' placeholder='Enter a Solana mint address...'><button>CHECK</button></form><p class='ex'>Example: Fartcoin - try a token you know.</p><div class='try'><a href='/pro'>Try PRO</a><a href='/pro_status'>Pro Status</a><a href='/health'>Health</a></div></div>
+</div>
+<div><div class='blobbox'><div class='pile'>
+<div class='pile-blob' style='left:8%;top:8%;width:64px;height:64px;background:#FF9AA2'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
+<div class='pile-blob' style='left:28%;top:2%;width:58px;height:58px;background:#FFD6A5'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
+<div class='pile-blob' style='left:48%;top:10%;width:70px;height:70px;background:#FDFFB6'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
+<div class='pile-blob' style='left:68%;top:4%;width:52px;height:52px;background:#CAFFBF'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
+<div class='pile-blob' style='left:82%;top:18%;width:60px;height:60px;background:#9BF6FF'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
+<div class='pile-blob' style='left:14%;top:42%;width:56px;height:56px;background:#BDB2FF'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
+<div class='pile-blob' style='left:36%;top:44%;width:62px;height:62px;background:#FFC6FF'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
+<div class='pile-blob' style='left:58%;top:46%;width:54px;height:54px;background:#FFAFCC'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
+<div class='pile-blob' style='left:74%;top:50%;width:66px;height:66px;background:#A0C4FF'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
+<div class='pile-blob' style='left:22%;top:70%;width:50px;height:50px;background:#B5E48C'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
+<div class='pile-blob' style='left:46%;top:72%;width:58px;height:58px;background:#FFD166'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
+<div class='pile-blob' style='left:66%;top:74%;width:52px;height:52px;background:#FF8FA3'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
+</div><div class='verdict'>PASS - HOLD-BUY - SELL</div></div></div>
+</div>
+<div class='three' id='what'><div class='mini'><b>Liquidity - can you sell?</b><p>We check how much money is actually in the pool, not just price. Low liquidity = you may not be able to sell.</p></div><div class='mini'><b>On-chain - who controls it?</b><p>Mint / freeze authorities, holder concentration, dev wallet. If one wallet controls it, it is risky.</p></div><div class='mini'><b>Price + Activity - is it pumping?</b><p>24h change, volume vs liquidity, and age. New + pumping + low liquidity = danger.</p></div></div>
+<div class='how' id='how'><h3 style='margin:0'>How it works - 3 steps</h3><div class='how-grid'><div class='mini'><b>1. Paste mint</b><p>Copy the mint from DexScreener or your wallet.</p></div><div class='mini'><b>2. We check live data</b><p>Market data + on-chain authorities. No opinions, just numbers.</p></div><div class='mini'><b>3. Get your verdict</b><p>PASS = good setup. HOLD-BUY = mixed, small size. SELL = do not buy.</p></div></div></div>
+<div class='agents' id='agents'><h3 style='margin:0 0 8px'>For Agents</h3><p style='font-size:13px;color:#666;margin:0 0 8px'>Use the JSON endpoint. No signup, no key needed.</p><div class='code'>GET /check?mint=...  /pro_json?mint=...
+{
+  "verdict": "avoid",
+  "symbol": "FART",
+  "price": 0.00012,
+  "liquidity_usd": 12345,
+  "top_holder": "12%",
+  "flags": ["low_liquidity", "new_pair"]
+}</div><p style='font-size:12px;color:#888'>PASS does not mean safe. Always check yourself.</p></div>
+<div class='foot'><span>2026 TVibe - Check a token before you buy.</span><span>Data is real. Not financial advice.</span></div>
+<div class='track'>
+<div class='runner' style='animation-delay:-0s'><div class='rblob' style='background:#FF9AA2'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
+<div class='runner' style='animation-delay:-2.2s'><div class='rblob' style='background:#FFD6A5'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
+<div class='runner' style='animation-delay:-4.4s'><div class='rblob' style='background:#FDFFB6'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
+<div class='runner' style='animation-delay:-6.6s'><div class='rblob' style='background:#CAFFBF'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
+<div class='runner' style='animation-delay:-8.8s'><div class='rblob' style='background:#9BF6FF'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
+<div class='runner' style='animation-delay:-11s'><div class='rblob' style='background:#BDB2FF'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
+<div class='runner' style='animation-delay:-13.2s'><div class='rblob' style='background:#FFC6FF'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
+</div>
+</body></html>
 """)
+
     # 1) Middleware - intercepts / BEFORE any other middleware / fallback
     try:
         @app.middleware("http")
@@ -442,3 +468,88 @@ try:
         print("[fix-check] /check alias added")
 except Exception as _e:
     print(f"[fix-check] FAILED: {_e}")
+
+# --- FIX CHECK V2: /pro must never crash, always show friendly error + debug ---
+try:
+    # Remove old /pro routes (they crash on Helius / DexScreener error)
+    try:
+        _old_pro = [r for r in (getattr(app, "routes", []) or []) if getattr(r, "path", "") == "/pro"]
+        if _old_pro:
+            app.router.routes = [r for r in app.router.routes if getattr(r, "path", "") != "/pro"]
+            try:
+                if getattr(app, "routes", None) is not app.router.routes:
+                    app.routes = [r for r in app.routes if getattr(r, "path", "") != "/pro"]
+            except Exception:
+                pass
+            print(f"[fix-check-v2] removed {len(_old_pro)} old /pro route(s)")
+    except Exception as _e:
+        print(f"[fix-check-v2] remove old /pro failed: {_e}")
+    from fastapi import Query as _QV2
+    from fastapi.responses import HTMLResponse as _HRV2, JSONResponse as _JRV2
+    def _pro_error_page(mint, err, step=""):
+        return _HRV2(
+            "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>Check failed</title>"
+            "<style>body{background:#FFF6C9;font-family:system-ui;padding:20px;color:#222}.card{background:#fff;border-radius:16px;padding:16px;max-width:640px;margin:0 auto}a{background:#111;color:#fff;padding:10px 14px;border-radius:10px;text-decoration:none;display:inline-block;margin-top:10px}code{background:#FFF6C9;padding:2px 6px;border-radius:6px}</style></head>"
+            f"<body><div class='card'><h2>Check failed, try again</h2><p>Mint: <code>{(mint or '')[:60]}</code></p><p>Step: <b>{step}</b></p><p>Error: <code>{str(err)[:400]}</code></p>"
+            "<p style='font-size:13px;color:#6b5d3f'>Common reasons: wrong mint, token has no pair yet, DexScreener / Helius is slow. Paste the correct Solana mint (32-44 chars) and try again.</p>"
+            "<form action='/pro' method='get'><input name='mint' placeholder='Paste Solana mint' style='padding:10px;width:70%;border-radius:10px;border:1px solid #ddd'><button style='background:#111;color:#fff;padding:10px 14px;border-radius:10px;border:0'>Check again</button></form>"
+            "<p><a href='/'>Back home</a> &nbsp; <a href='/pro_status'>Pro Status</a></p></div></body></html>",
+            status_code=200)
+    @app.get("/pro")
+    def _pro_robust(mint: str = _QV2(default="")):
+        m = (mint or "").strip()
+        if not m:
+            return _HRV2("<h3>Need mint</h3><p>Paste Solana mint: /pro?mint=...</p><p><a href='/'>Back home</a></p>", status_code=400)
+        if len(m) < 32 or len(m) > 44:
+            return _pro_error_page(m, "Mint looks wrong - Solana mint is 32-44 characters", step="validate mint")
+        # Try premium first
+        try:
+            fn = globals().get("pro_premium")
+            if fn is None:
+                # Try to find it in loader namespace g
+                try:
+                    fn = g.get("pro_premium") if isinstance(g, dict) else None
+                except Exception:
+                    fn = None
+            if fn is None:
+                return _pro_error_page(m, "PRO function not loaded. Check /pro_status", step="load pro_premium")
+            o = fn(m)
+            if isinstance(o, dict) and o.get("status") == "not_found":
+                return _pro_error_page(m, "No pair found on DexScreener for this mint. Token may be new, no liquidity, or wrong mint.", step="find pair")
+            # If pro_premium returned HTML string, return it
+            if isinstance(o, str):
+                return _HRV2(o)
+            # If it returned dict, render simple grade page (avoid crash in old HTML builder)
+            try:
+                sym = o.get("symbol") or m[:8]
+                grade = o.get("grade") or o.get("Grade") or "?"
+                risk = o.get("risk_score") or o.get("risk") or "?"
+                # Try to use old HTML builder if it exists in globals
+                return _JRV2(o) if False else _HRV2(
+                    "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'><title>PRO Result</title>"
+                    "<style>body{background:#FFF6C9;font-family:system-ui;padding:20px;color:#222}.card{background:#fff;border-radius:16px;padding:16px;max-width:720px;margin:0 auto}a{background:#111;color:#fff;padding:10px 14px;border-radius:10px;text-decoration:none;display:inline-block;margin-top:10px}</style></head>"
+                    f"<body><div class='card'><h2>{sym} - Grade {grade}</h2><p>Risk score: {risk}</p><p>Mint: <code>{m}</code></p>"
+                    f"<p>Holder: {o.get('holders') or o.get('holder') or 'n/a'}</p><p>Full JSON: <a href='/pro_json?mint={m}'>/pro_json</a></p>"
+                    f"<p style='font-size:12px;color:#7A6A55'>PASS does not mean safe. Always check yourself.</p><p><a href='/'>Back home</a></p></div></body></html>")
+            except Exception as e2:
+                return _pro_error_page(m, e2, step="render result")
+        except Exception as e:
+            print(f"[fix-check-v2] /pro error mint={m[:20]} err={e}")
+            return _pro_error_page(m, e, step="pro_premium")
+    @app.get("/pro_debug")
+    def _pro_debug(mint: str = _QV2(default="")):
+        m = (mint or "").strip()
+        info = {"mint": m, "len": len(m), "pro_premium_found": False, "error": None}
+        try:
+            fn = globals().get("pro_premium")
+            info["pro_premium_found"] = fn is not None
+            if fn is not None:
+                o = fn(m) if m else {"error": "need mint"}
+                info["result_keys"] = list(o.keys())[:20] if isinstance(o, dict) else str(type(o))
+                info["status"] = o.get("status") if isinstance(o, dict) else "not dict"
+        except Exception as e:
+            info["error"] = str(e)[:500]
+        return _JRV2(info)
+    print("[fix-check-v2] robust /pro + /pro_debug installed")
+except Exception as _e:
+    print(f"[fix-check-v2] FAILED: {_e}")
