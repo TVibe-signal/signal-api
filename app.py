@@ -317,23 +317,68 @@ print(f"[loader] ready entry=app:app version={_ver} routes~={len(getattr(app, 'r
 # Previous fix removed 0 routes, so / is not in router. Force it via middleware (runs before routing) + insert route at 0.
 try:
     from fastapi.responses import HTMLResponse as _HTMLResponse2
-    _HOME_HTML2 = ("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<title>TVibe Signal</title>"
-        "<style>body{background:#FFF6C9;font-family:system-ui;padding:20px;color:#222}input{padding:10px;width:78%;border-radius:10px;border:1px solid #ddd}a,button{background:#111;color:#fff;padding:10px 14px;border-radius:10px;text-decoration:none;border:0}.card{background:#fff;border-radius:16px;padding:16px;margin:14px 0}</style></head>"
-        "<body><h1>TVibe Signal</h1><p>Check a Solana token before you buy. PASS does not mean safe.</p>"
-        "<div class='card'><h3>Check token</h3><form action='/pro' method='get'><input name='mint' placeholder='Paste Solana mint'><button>Check PRO</button></form>"
-        "<p style='font-size:13px'>Paste mint, then see Grade + Holder / LP / Dev.</p></div>"
-        "<div class='card'><h3>Quick links</h3><p><a href='/pro_status'>Pro Status</a> &nbsp; <a href='/health'>Health</a> &nbsp; <a href='/play'>Playground</a> &nbsp; <a href='/pro'>PRO</a></p>"
-        "<p style='font-size:13px'>Agent JSON: /pro_json?mint=... &nbsp; Compare: /compare?mint1=...&mint2=...</p></div>"
-        "<p style='font-size:12px;color:#7A6A55'>PASS does not mean safe. Always check yourself.</p></body></html>")
+    _HOME_HTML2 = ("""
+<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
+<title>TVibe Signal - Check Solana Token</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#FFF6C9;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#222;padding:0 0 40px}
+.wrap{max-width:860px;margin:0 auto;padding:18px 14px}
+.header{display:flex;align-items:center;gap:12px}.logo{width:52px;height:52px;background:#111;color:#fff;border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:28px;transform:rotate(-4deg)}
+h1{margin:0;font-size:32px;letter-spacing:-0.5px}.sub{color:#6b5d3f;margin:6px 0 14px;font-size:14px}
+.stage{background:#fff;border-radius:20px;padding:14px 14px 8px;overflow:hidden;position:relative;box-shadow:0 6px 20px rgba(0,0,0,.06);border:2px solid #ffe9a8}
+.stage-title{font-weight:800;font-size:13px;letter-spacing:.6px;color:#8a7a4a}
+.track{position:relative;height:110px;margin-top:8px;overflow:hidden;background:#FFF6C9;border-radius:14px}
+.runner{position:absolute;bottom:12px;left:-80px;animation:run 14s linear infinite}
+.blob{width:56px;height:56px;border-radius:50% 50% 46% 54%;display:flex;align-items:center;justify-content:center;flex-direction:column;animation:jump .7s ease-in-out infinite alternate;box-shadow:inset -6px -6px 0 rgba(0,0,0,.06)}
+.eyes{display:flex;gap:8px}.eye{width:8px;height:9px;background:#111;border-radius:50%}.mouth{width:14px;height:7px;border:2px solid #111;border-top:0;border-radius:0 0 12px 12px;margin-top:3px}
+.b1{background:#FF9AA2}.b2{background:#FFD6A5}.b3{background:#FDFFB6}.b4{background:#CAFFBF}.b5{background:#9BF6FF}.b6{background:#BDB2FF}.b7{background:#FFC6FF}
+.r1{animation-delay:0s}.r1 .blob{animation-delay:0s}
+.r2{animation-delay:1.8s}.r2 .blob{animation-delay:.1s}
+.r3{animation-delay:3.6s}.r3 .blob{animation-delay:.2s}
+.r4{animation-delay:5.4s}.r4 .blob{animation-delay:.3s}
+.r5{animation-delay:7.2s}.r5 .blob{animation-delay:.4s}
+.r6{animation-delay:9s}.r6 .blob{animation-delay:.5s}
+.r7{animation-delay:10.8s}.r7 .blob{animation-delay:.6s}
+@keyframes run{0%{left:-80px;transform:rotate(0)}45%{left:88%}50%{left:88%;transform:rotate(0)}55%{left:88%}100%{left:-80px;transform:rotate(-360deg)}}
+@keyframes jump{from{transform:translateY(0) scale(1,1)}to{transform:translateY(-18px) scale(.96,1.05)}}
+.card{background:#fff;border-radius:20px;padding:16px;margin:14px 0;box-shadow:0 6px 20px rgba(0,0,0,.06);border:2px solid #ffe9a8}
+.card h3{margin:0 0 10px}.row{display:flex;gap:8px}input{flex:1;padding:12px;border-radius:12px;border:1.5px solid #eee;font-size:15px;outline:none}input:focus{border-color:#111}
+button{background:#111;color:#fff;border:0;padding:12px 16px;border-radius:12px;font-weight:800;cursor:pointer}
+.pills{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}.pill{background:#111;color:#fff;padding:9px 13px;border-radius:999px;text-decoration:none;font-size:13px;font-weight:700}.pill.light{background:#FFF6C9;color:#111;border:1.5px solid #111}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}.feat{background:#FFF6C9;border-radius:16px;padding:12px}.feat b{font-size:14px}.feat p{margin:6px 0 0;font-size:12.5px;color:#6b5d3f;line-height:1.5}
+.note{font-size:12px;color:#8a7a4a;text-align:center;margin-top:10px}
+@media(max-width:520px){.grid{grid-template-columns:1fr}h1{font-size:26px}}
+</style></head>
+<body><div class='wrap'>
+<div class='header'><div class='logo'>&#9679;</div><div><h1>TVibe Signal</h1><div class='sub'>Check a Solana token before you buy. PASS does not mean safe.</div></div></div>
+<div class='stage'><div class='stage-title'>7 FRIENDS ON PATROL - THEY CHECK, YOU DECIDE</div><div class='track'>
+<div class='runner r1'><div class='blob b1'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
+<div class='runner r2'><div class='blob b2'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
+<div class='runner r3'><div class='blob b3'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
+<div class='runner r4'><div class='blob b4'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
+<div class='runner r5'><div class='blob b5'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
+<div class='runner r6'><div class='blob b6'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
+<div class='runner r7'><div class='blob b7'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
+</div></div>
+<div class='card'><h3>Check token</h3><form action='/pro' method='get' class='row'><input name='mint' placeholder='Paste Solana mint'><button>Check PRO</button></form><p style='font-size:13px;color:#6b5d3f'>Paste mint, then see Grade + Holder / LP / Dev. Example: try a token you know.</p><div class='pills'><a class='pill' href='/pro'>PRO</a><a class='pill' href='/pro_status'>Pro Status</a><a class='pill' href='/health'>Health</a><a class='pill light' href='/play'>Playground</a></div></div>
+<div class='card'><h3>What PRO checks</h3><div class='grid'><div class='feat'><b>Holder & Top holder</b><p>Who holds most? Top 1% + Top 10% + concentration. Bundle risk if one wallet holds too much.</p></div><div class='feat'><b>LP Lock</b><p>Is liquidity locked / burned? Unlocked LP = dev can pull.</p></div><div class='feat'><b>Dev & Authority</b><p>Creator, dev holds, mint / freeze authority still on or revoked?</p></div><div class='feat'><b>Grade A-F</b><p>One grade + 5 breakdowns: Market / Holder / LP / Dev / Authority. No hidden thresholds.</p></div></div><div class='pills'><a class='pill light' href='/compare'>Compare 2 tokens</a><a class='pill light' href='/batch'>Batch 5 tokens</a><a class='pill light' href='/pro_json'>Agent JSON</a></div></div>
+<div class='note'>PASS does not mean safe. Always check yourself. &bull; TVibe Signal</div>
+</div></body></html>
+""")
     # 1) Middleware - intercepts / BEFORE any other middleware / fallback
     try:
         @app.middleware("http")
         async def _fix_root_mw(request, call_next):
             try:
                 p = getattr(getattr(request, "url", None), "path", "") or ""
+                q = dict(getattr(request, "query_params", {}) or {})
+                mint_q = (q.get("mint") or "").strip()
             except Exception:
-                p = ""
+                p = ""; mint_q = ""
+            if (p == "/" or p == "") and mint_q:
+                # Old home flow /?mint=... -> forward to /pro?mint=...
+                from fastapi.responses import RedirectResponse as _RR
+                return _RR(url=f"/pro?mint={mint_q}", status_code=302)
             if p == "/" or p == "":
                 return _HTMLResponse2(_HOME_HTML2)
             return await call_next(request)
@@ -361,3 +406,39 @@ try:
         print(f"[fix2] route insert failed: {_e3}")
 except Exception as _e:
     print(f"[fix2] FAILED: {_e}")
+
+# --- FIX CHECK: ensure /pro and /check exist even if premium patch skipped ---
+try:
+    _paths_now = [getattr(r, "path", "") for r in (getattr(app, "routes", []) or [])]
+    if "/pro" not in _paths_now:
+        print("[fix-check] /pro missing, adding fallback /pro")
+        from fastapi.responses import HTMLResponse as _HR2, JSONResponse as _JR2
+        from fastapi import Query as _Q2
+        @app.get("/pro")
+        def _pro_fallback(mint: str = _Q2(default="")):
+            m = (mint or "").strip()
+            if not m:
+                return _HR2("<h3>Need mint</h3><p>Paste Solana mint: /pro?mint=...</p>", status_code=400)
+            # Try to use premium function if available in globals
+            try:
+                fn = globals().get("pro_premium") or globals().get("_pro_premium")
+                if fn is None:
+                    return _HR2("<h3>PRO not loaded</h3><p>Premium patch not applied. Check /pro_status</p>", status_code=500)
+                o = fn(m)
+                if isinstance(o, dict) and o.get("status") == "not_found":
+                    return _HR2("<h3>Not found</h3><p>No pair for this mint.</p>", status_code=404)
+                return _JR2(o)
+            except Exception as e:
+                return _HR2(f"<h3>Error</h3><p>{e}</p>", status_code=500)
+        print("[fix-check] /pro fallback added")
+    # /check alias -> same as /pro (old interface used /check?mint=)
+    _paths2 = [getattr(r, "path", "") for r in (getattr(app, "routes", []) or [])]
+    if "/check" not in _paths2:
+        from fastapi import Query as _Q3
+        from fastapi.responses import RedirectResponse as _RR3
+        @app.get("/check")
+        def _check_alias(mint: str = _Q3(default="")):
+            return _RR3(url=f"/pro?mint={(mint or '').strip()}", status_code=302)
+        print("[fix-check] /check alias added")
+except Exception as _e:
+    print(f"[fix-check] FAILED: {_e}")
