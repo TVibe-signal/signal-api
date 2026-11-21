@@ -59,6 +59,142 @@ RPC_CONFIGURED = bool(HELIUS_URL)
 # On-chain cache: 5 min per mint, saves Helius credits
 _RPC_CACHE = {}
 _RPC_CACHE_TTL = 300
+# ---------- ANTI-SPAM / HELIUS COST PROTECTION (v41) ----------
+# No CAPTCHA, no login - just cheap guards so 1 bot can't burn Helius credits.
+_DEX_CACHE = {}  # mint -> (ts, pair)
+_DEX_CACHE_TTL = 60  # DexScreener cached 60s - F5 spam hits cache, not Dex
+_VERDICT_CACHE = {}  # mint -> (ts, obj)
+_VERDICT_CACHE_TTL = 30  # Same mint within 30s = same verdict, no new RPC
+_IP_HITS = {}  # ip -> [timestamps]
+_IP_LIMIT_MIN = 10  # max 10 checks / min / IP
+_IP_LIMIT_HOUR = 60  # max 60 checks / hour / IP
+_HELIUS_MIN = {"ts": 0, "n": 0}  # per-minute bucket
+_HELIUS_DAY = {"day": "", "n": 0}  # per-day bucket
+_HELIUS_MAX_PER_MIN = 120
+_HELIUS_MAX_PER_DAY = 8000  # safety cap - if hit, we go market-only, never crash
+_OUTCOME_BINS_CACHE = {"ts": 0, "bins": {}, "n_total": 0}
+_OUTCOME_BINS_TTL = 600  # 10 min
+
+def _client_ip(request):
+    try:
+        xf = (request.headers.get("x-forwarded-for") or "").split(",")[0].strip()
+        if xf: return xf
+        if request.client: return request.client.host
+    except: pass
+    return "unknown"
+
+def _rate_limit_ok(ip):
+    now = time.time()
+    lst = _IP_HITS.get(ip, [])
+    lst = [t for t in lst if now - t < 3600]
+    # per-minute check
+    recent_min = [t for t in lst if now - t < 60]
+    if len(recent_min) >= _IP_LIMIT_MIN: 
+        _IP_HITS[ip] = lst
+        return False
+    if len(lst) >= _IP_LIMIT_HOUR:
+        _IP_HITS[ip] = lst
+        return False
+    lst.append(now); _IP_HITS[ip] = lst
+    # prune old IPs sometimes
+    if len(_IP_HITS) > 2000:
+        for k in list(_IP_HITS.keys()):
+            if not _IP_HITS[k] or now - _IP_HITS[k][-1] > 3600:
+                del _IP_HITS[k]
+    return True
+
+def _helius_budget_ok():
+    now = time.time()
+    # minute bucket
+    if now - _HELIUS_MIN["ts"] > 60:
+        _HELIUS_MIN["ts"] = now; _HELIUS_MIN["n"] = 0
+    # day bucket
+    day = time.strftime("%Y-%m-%d", time.gmtime(now))
+    if _HELIUS_DAY["day"] != day:
+        _HELIUS_DAY["day"] = day; _HELIUS_DAY["n"] = 0
+    if _HELIUS_MIN["n"] >= _HELIUS_MAX_PER_MIN: return False
+    if _HELIUS_DAY["n"] >= _HELIUS_MAX_PER_DAY: return False
+    _HELIUS_MIN["n"] += 1; _HELIUS_DAY["n"] += 1
+    return True
+
+def _is_valid_mint(m):
+    if not m or not isinstance(m, str): return False
+    m = m.strip()
+    if len(m) < 32 or len(m) > 44: return False
+    # Base58: no 0 O I l
+    if any(c in m for c in "0OIl"): return False
+    import string as _s
+    allowed = set(_s.ascii_letters + _s.digits)
+    if any(c not in allowed for c in m): return False
+    return True
+
+# ---------- REAL 24H OUTCOME (fix p_bad_24h) ----------
+def classify_outcome(snap, now_pair):
+    # snap: {price_usd, liquidity_usd, risk_score, verdict, ts, mint}
+    # Returns (is_bad, outcome_type, price_chg, liq_chg)
+    try:
+        p0 = float(snap.get("price_usd") or 0)
+        l0 = float(snap.get("liquidity_usd") or 0)
+    except: return (True, "unknown", 0, 0)
+    if now_pair is None:
+        return (True, "liquidity_pulled", -1.0, -1.0)
+    try:
+        p1 = float(now_pair.get("priceUsd") or 0)
+        l1 = float((now_pair.get("liquidity") or {}).get("usd") or 0)
+    except: return (True, "unknown", 0, 0)
+    p_chg = (p1 - p0)/p0 if p0 > 0 else 0
+    l_chg = (l1 - l0)/l0 if l0 > 0 else 0
+    price_bad = p_chg <= -0.50
+    liq_bad = (l0 > 0 and l1 <= 0) or l_chg <= -0.70
+    if price_bad and liq_bad: return (True, "liquidity_and_price", round(p_chg,4), round(l_chg,4))
+    if liq_bad: return (True, "liquidity_pulled", round(p_chg,4), round(l_chg,4))
+    if price_bad: return (True, "price_decay", round(p_chg,4), round(l_chg,4))
+    return (False, "ok", round(p_chg,4), round(l_chg,4))
+
+def _load_outcome_bins():
+    now = time.time()
+    if now - _OUTCOME_BINS_CACHE["ts"] < _OUTCOME_BINS_TTL and _OUTCOME_BINS_CACHE["bins"] is not None:
+        return _OUTCOME_BINS_CACHE["bins"], _OUTCOME_BINS_CACHE["n_total"]
+    bins = {}
+    n_total = 0
+    try:
+        rows = up_lrange("outcomes", 0, -1)
+        for r in rows:
+            try: o = json.loads(r)
+            except: continue
+            s = float(o.get("risk_score") or 0); b = int(s//10*10)
+            if b not in bins: bins[b] = {"n":0,"bad":0}
+            bins[b]["n"] += 1; n_total += 1
+            if o.get("is_bad"): bins[b]["bad"] += 1
+    except: pass
+    _OUTCOME_BINS_CACHE["ts"] = now; _OUTCOME_BINS_CACHE["bins"] = bins; _OUTCOME_BINS_CACHE["n_total"] = n_total
+    return bins, n_total
+
+def get_calibrated_p_bad(score):
+    # Returns (p, lo, hi, source)
+    base = p_bad_from_score(score)
+    try:
+        bins, n_total = _load_outcome_bins()
+        b = int(score//10*10)
+        info = bins.get(b)
+        if not info or info["n"] < 5:
+            # Not enough real data for this bin - use formula, mark estimate
+            lo, hi = wilson_ci(int(round(base*100)), 100)
+            return (base, lo, hi, "estimate")
+        emp = info["bad"]/info["n"] if info["n"] else base
+        if info["n"] >= 20:
+            p = emp
+            lo, hi = wilson_ci(info["bad"], info["n"])
+            return (max(0.02,min(0.97,p)), lo, hi, f"real_24h_outcomes n={info['n']}")
+        else:
+            # Blend: 60% formula + 40% empirical while we collect more
+            p = 0.6*base + 0.4*emp
+            lo, hi = wilson_ci(info["bad"], info["n"])
+            return (max(0.02,min(0.97,p)), lo, hi, f"blended n={info['n']}")
+    except:
+        lo, hi = wilson_ci(int(round(base*100)), 100)
+        return (base, lo, hi, "estimate")
+
 
 
 _locks = {}
@@ -97,12 +233,22 @@ def wilson_ci(k,n,z=1.96):
 def p_bad_from_score(s):
     x=(s-35)/18.0; p=1/(1+math.exp(-x)); return max(0.02,min(0.97,p))
 
-def fetch_pair(mint):
-    url=f"https://api.dexscreener.com/latest/dex/tokens/{mint.strip()}"
+def fetch_pair(mint, use_cache=True):
+    m = (mint or "").strip()
+    now = time.time()
+    if use_cache and m in _DEX_CACHE:
+        ts, val = _DEX_CACHE[m]
+        if now - ts < _DEX_CACHE_TTL:
+            return val
+    url=f"https://api.dexscreener.com/latest/dex/tokens/{m}"
     r=requests.get(url, timeout=12); r.raise_for_status()
     pairs=r.json().get("pairs") or []
-    if not pairs: return None
-    return sorted(pairs, key=lambda p: (p.get("liquidity") or {}).get("usd") or 0, reverse=True)[0]
+    if not pairs:
+        if use_cache: _DEX_CACHE[m] = (now, None)
+        return None
+    best = sorted(pairs, key=lambda p: (p.get("liquidity") or {}).get("usd") or 0, reverse=True)[0]
+    if use_cache: _DEX_CACHE[m] = (now, best)
+    return best
 
 # ---------- Helius on-chain ----------
 def _rpc_get_mint_info_single(rpc_url, mint):
@@ -145,14 +291,16 @@ def _rpc_get_mint_info_single(rpc_url, mint):
         return None
 
 def get_onchain(mint):
-    """Helius only. Cached 5 min. Never raises. Never blocks verdict."""
+    """Helius only. Cached 5 min. Budget-guarded. Never raises. Never blocks verdict."""
     m = (mint or "").strip()
     now = time.time()
     if m in _RPC_CACHE:
         ts, val = _RPC_CACHE[m]
         if now - ts < _RPC_CACHE_TTL:
             return val
-    # Helius only - no QuickNode
+    # Helius only - no QuickNode. Budget guard: if we burned too much, skip RPC and go market-only.
+    if not _helius_budget_ok():
+        return {"available": False, "rpc_source": "none", "rpc_latency_ms": 0, "mint_authority": None, "freeze_authority": None, "note": "Helius budget reached. Verdict from market data only."}
     chain = []
     if HELIUS_URL:
         chain.append((RPC_LABEL, HELIUS_URL))
@@ -274,7 +422,7 @@ def compute(mint,pair):
     if score>=55 or "dead_pool" in flags or ch24<=DUMP_24H: verdict="avoid"; label="SELL"
     elif score>=35 or liq<LIQ_HOLD or ch24<=WARN_24H: verdict="caution"; label="HOLD-BUY"
     else: verdict="ok"; label="PASS"
-    p_bad=p_bad_from_score(score); k=int(round(p_bad*100)); lo,hi=wilson_ci(k,100)
+    p_bad, lo, hi, p_source = get_calibrated_p_bad(score)
     # human explanation in English, no thresholds - must NOT say "clean/safe" when volatile
     if verdict=="avoid":
         if "dead_pool" in flags: why="Do not buy. No liquidity to sell."
@@ -295,7 +443,7 @@ def compute(mint,pair):
             why="Good setup. Up fast — don't chase."
         else:
             why="Good setup. Still risky — don't chase."
-    return {"mint":mint,"symbol":symbol,"name":name,"price_usd":price,"liquidity_usd":liq,"volume_24h":vol24,"change_24h_pct":ch24,"fdv":fdv,"age_h":round(age_h,2),"pair_url":pair_url,"risk_score":score,"flags":flags,"verdict":verdict,"label":label,"p_bad_24h":round(p_bad,4),"p_bad_ci_low":round(lo,4),"p_bad_ci_high":round(hi,4),"why":why,"ts":int(time.time()),"version":VERSION}
+    return {"mint":mint,"symbol":symbol,"name":name,"price_usd":price,"liquidity_usd":liq,"volume_24h":vol24,"change_24h_pct":ch24,"fdv":fdv,"age_h":round(age_h,2),"pair_url":pair_url,"risk_score":score,"flags":flags,"verdict":verdict,"label":label,"p_bad_24h":round(p_bad,4),"p_bad_ci_low":round(lo,4),"p_bad_ci_high":round(hi,4),"p_bad_source":p_source,"why":why,"ts":int(time.time()),"version":VERSION}
 
 def append_ledger(obj):
     try:
@@ -305,6 +453,11 @@ def append_ledger(obj):
         rec=dict(obj); rec["hash"]=h; rec["prev"]=prev; rec["id"]=f"{obj.get('mint')}:{obj.get('ts')}"
         up_rpush("ledger", json.dumps(rec, ensure_ascii=False)); up_set("ledger_head", h)
         up_set(f"snap:{obj.get('mint')}:{obj.get('ts')}", json.dumps(rec, ensure_ascii=False))
+        # snap_list for 24h outcome job: minimal snapshot
+        try:
+            snap_min = {"mint": obj.get("mint"), "ts": obj.get("ts"), "price_usd": obj.get("price_usd"), "liquidity_usd": obj.get("liquidity_usd"), "risk_score": obj.get("risk_score"), "verdict": obj.get("verdict")}
+            up_rpush("snap_list", json.dumps(snap_min, ensure_ascii=False))
+        except: pass
         return rec
     except: return dict(obj)
 
@@ -439,20 +592,103 @@ def result_html(o):
 <div style="margin-top:16px;display:flex;gap:14px;flex-wrap:wrap;font-size:14px">{'<a href="'+o['pair_url']+'" target="_blank">View pair on DexScreener →</a>' if o['pair_url'] else ''}<a href="/check?mint='+o['mint']+'&format=json">View as JSON for agents →</a><a href="/">← Check another token</a></div>
 </div><div class="foot"><span>TVibe — Check a token before you buy.</span><span>Data is real. Not financial advice.</span></div></div></body></html>"""
 
+
+def error_html(title, msg, mint="", code=404):
+    # Cute error page - same paper + blobs, no JSON, no scary stack trace
+    _m = (mint or "")[:60]
+    return f"""<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>TVibe — {title}</title><link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet"><style>{CSS}</style></head><body>
+<div class="runners"><span class="runner r1"><i></i><i></i></span><span class="runner r2"><i></i><i></i></span><span class="runner r3"><i></i><i></i></span><span class="runner r4"><i></i><i></i></span><span class="runner r5"><i></i><i></i></span><span class="runner r6"><i></i><i></i></span><span class="runner r7"><i></i><i></i></span></div>
+<div class="top"><div class="logo"><span class="logo-dot">●</span> TVibe</div><div class="nav"><a href="/">← New check</a><a href="/health">Health</a></div></div>
+<div class="wrap" style="text-align:center;max-width:620px;margin:40px auto">
+<div style="font-size:64px">🧸</div>
+<h1 style="font-size:38px;margin:10px 0">{title}</h1>
+<p style="font-size:16px;color:#7A6A55;line-height:1.6">{msg}</p>
+{f'<div style="margin:14px auto;background:#fff;border:2px solid #1E1A16;border-radius:14px;padding:10px 14px;font-size:13px;word-break:break-all">Mint: <code>{_m}</code></div>' if _m else ''}
+<div style="margin-top:22px;display:flex;gap:10px;justify-content:center;flex-wrap:wrap">
+<a href="/" style="background:#1E1A16;color:#fff;padding:12px 22px;border-radius:999px;font-weight:800;text-decoration:none;box-shadow:3px 3px 0 #F97316">Try another token →</a>
+<a href="/health" style="background:#fff;color:#1E1A16;padding:12px 22px;border-radius:999px;font-weight:800;text-decoration:none;border:2px solid #1E1A16">Check server health</a>
+</div>
+<p style="font-size:12px;color:#9A8B75;margin-top:18px">Tip: Copy the mint from DexScreener / Raydium — it starts with a letter and is 32-44 characters long.</p>
+</div></body></html>"""
+
+@app.get("/ping")
+def ping():
+    # Ultra-light keep-alive for cron-job.org / UptimeRobot - NO Dex, NO Helius, NO Upstash
+    return {"status":"ok","version":VERSION,"uptime_s":int(time.time()-START),"checks":CHECKS["count"]}
+
+@app.get("/cron/outcome")
+def cron_outcome(request: Request, limit: int = 50):
+    # Run every hour via cron-job.org: GET /cron/outcome?key=ADMIN_KEY
+    # Finds snaps older than 24h, checks real price/liq now, writes to outcomes list.
+    # This is what makes p_bad_24h REAL instead of formula.
+    if not _need_key(request): return JSONResponse({"error":"unauthorized"}, status_code=401)
+    now = int(time.time())
+    snaps = up_lrange("snap_list", 0, -1)
+    done = 0; checked = 0; skipped = 0
+    results = []
+    for raw in snaps[:500]:
+        if checked >= limit: break
+        try: snap = json.loads(raw)
+        except: continue
+        ts = int(snap.get("ts") or 0)
+        if now - ts < 86400: skipped += 1; continue  # not 24h yet
+        mint = snap.get("mint") or ""
+        done_key = f"outcome_done:{mint}:{ts}"
+        if up_get(done_key): skipped += 1; continue
+        checked += 1
+        try: now_pair = fetch_pair(mint, use_cache=False)
+        except: now_pair = None
+        is_bad, otype, p_chg, l_chg = classify_outcome(snap, now_pair)
+        rec = {"mint": mint, "snap_ts": ts, "check_ts": now, "is_bad": is_bad, "outcome": otype, "price_chg_24h_plus": p_chg, "liq_chg": l_chg, "risk_score": snap.get("risk_score"), "verdict": snap.get("verdict"), "price_then": snap.get("price_usd"), "liquidity_then": snap.get("liquidity_usd")}
+        up_rpush("outcomes", json.dumps(rec, ensure_ascii=False))
+        up_set(done_key, "1")
+        done += 1; results.append(rec)
+    # bust outcome bins cache so next check uses new data
+    _OUTCOME_BINS_CACHE["ts"] = 0
+    return {"checked": checked, "wrote": done, "skipped_not_ready": skipped, "outcomes": results[:10]}
+
 @app.get("/health")
-def health(): return {"status":"ok","version":VERSION,"uptime_s":int(time.time()-START),"checks":CHECKS["count"],"rpc_configured":RPC_CONFIGURED,"rpc_label":RPC_LABEL,"rpc_sources":{"helius":bool(HELIUS_URL)},"onchain_cache":len(_RPC_CACHE)}
+def health():
+    bins, n_out = _load_outcome_bins()
+    return {"status":"ok","version":VERSION,"uptime_s":int(time.time()-START),"checks":CHECKS["count"],"rpc_configured":RPC_CONFIGURED,"rpc_label":RPC_LABEL,"rpc_sources":{"helius":bool(HELIUS_URL)},"onchain_cache":len(_RPC_CACHE),"dex_cache":len(_DEX_CACHE),"verdict_cache":len(_VERDICT_CACHE),"helius_min_calls":_HELIUS_MIN["n"],"helius_day_calls":_HELIUS_DAY["n"],"outcomes_n":n_out,"p_bad_source":"real_24h_outcomes" if n_out>=20 else "estimate (collecting outcomes)"}
 @app.get("/", response_class=HTMLResponse)
 def index(): return HOME
 @app.get("/check")
 def check(request: Request, mint: str = Query(default=""), token: str = Query(default=""), format: str = Query(default="")):
     m=(mint or token or "").strip()
-    if not m: return JSONResponse({"error":"missing mint"}, status_code=400)
+    want_html = (format=="html") or ("text/html" in (request.headers.get("accept") or ""))
+    # --- Anti-spam: rate limit per IP ---
+    ip = _client_ip(request)
+    if not _rate_limit_ok(ip):
+        if want_html and format!="json":
+            return HTMLResponse(error_html("Slow down, blob! 🐢", "You checked too many tokens too fast. Wait 1 minute, then try again. This keeps Helius costs low so TVibe stays free.", m, 429), status_code=429)
+        return JSONResponse({"error":"rate_limited","message":"Too many checks. Wait 60s.","mint":m}, status_code=429)
+    if not m:
+        if want_html and format!="json": return HTMLResponse(error_html("Missing mint 🧸", "Paste a Solana mint address first — like the one you see on DexScreener.", "", 400), status_code=400)
+        return JSONResponse({"error":"missing mint"}, status_code=400)
+    # --- Validate mint format before burning any API call ---
+    if not _is_valid_mint(m):
+        if want_html and format!="json": return HTMLResponse(error_html("That doesn't look like a mint 🧸", "A Solana mint is 32-44 characters, no spaces, no 0 O I l. Copy it again from DexScreener and paste it here.", m, 400), status_code=400)
+        return JSONResponse({"error":"invalid mint","mint":m,"message":"Mint must be 32-44 base58 chars"}, status_code=400)
+    # --- Verdict cache: same mint within 30s = no new Dex/Helius ---
+    _now = time.time()
+    if m in _VERDICT_CACHE:
+        _cts, _cobj = _VERDICT_CACHE[m]
+        if _now - _cts < _VERDICT_CACHE_TTL:
+            if format=="json": return _cobj
+            if want_html: return HTMLResponse(result_html(_cobj))
+            return _cobj
     lock=_lock_for(m)
     if not lock.acquire(blocking=False): return JSONResponse({"status":"busy","mint":m,"message":"Check is running, retry in 3s"}, status_code=429)
     try:
         CHECKS["count"]+=1
-        pair=fetch_pair(m)
-        if not pair: return JSONResponse({"mint":m,"status":"not_found","verdict":"avoid","label":"SELL","p_bad_24h":0.9}, status_code=404)
+        try: pair=fetch_pair(m)
+        except Exception as e:
+            if want_html and format!="json": return HTMLResponse(error_html("DexScreener is having a nap 😴", "We couldn't reach DexScreener right now. Wait 30 seconds and try again — your token might be fine, it's just our data source.", m, 502), status_code=502)
+            return JSONResponse({"error":"dexscreener_down","mint":m}, status_code=502)
+        if not pair:
+            if want_html and format!="json": return HTMLResponse(error_html("We can't find this token 🕵️", "No pair found on DexScreener. It might be brand new, delisted, or the mint is wrong. Check the mint again and try later.", m, 404), status_code=404)
+            return JSONResponse({"mint":m,"status":"not_found","verdict":"avoid","label":"SELL","p_bad_24h":0.9}, status_code=404)
         obj=compute(m,pair)
         # Helius enrichment: never blocks verdict, never 500s
         try:
@@ -462,12 +698,17 @@ def check(request: Request, mint: str = Query(default=""), token: str = Query(de
             obj["onchain"] = {"available": False, "rpc_source": "none", "note": "On-chain check failed. Verdict from market data only."}
         try: append_ledger(obj)
         except: pass
-        out={"mint":obj["mint"],"symbol":obj["symbol"],"name":obj["name"],"verdict":obj["verdict"],"label":obj["label"],"risk_score":obj["risk_score"],"p_bad_24h":obj["p_bad_24h"],"p_bad_ci":[obj["p_bad_ci_low"],obj["p_bad_ci_high"]],"price_usd":obj["price_usd"],"liquidity_usd":obj["liquidity_usd"],"volume_24h":obj["volume_24h"],"change_24h_pct":obj["change_24h_pct"],"age_h":obj["age_h"],"fdv":obj["fdv"],"flags":obj["flags"],"pair_url":obj["pair_url"],"why":obj["why"],"ts":obj["ts"],"version":VERSION,"status":"ok","onchain":obj.get("onchain") or {"available":False,"rpc_source":"none"}}
+        # cache verdict for 30s anti-spam
+        try: _VERDICT_CACHE[m] = (time.time(), obj)
+        except: pass
+        out={"mint":obj["mint"],"symbol":obj["symbol"],"name":obj["name"],"verdict":obj["verdict"],"label":obj["label"],"risk_score":obj["risk_score"],"p_bad_24h":obj["p_bad_24h"],"p_bad_ci":[obj["p_bad_ci_low"],obj["p_bad_ci_high"]],"p_bad_source":obj.get("p_bad_source","estimate"),"price_usd":obj["price_usd"],"liquidity_usd":obj["liquidity_usd"],"volume_24h":obj["volume_24h"],"change_24h_pct":obj["change_24h_pct"],"age_h":obj["age_h"],"fdv":obj["fdv"],"flags":obj["flags"],"pair_url":obj["pair_url"],"why":obj["why"],"ts":obj["ts"],"version":VERSION,"status":"ok","onchain":obj.get("onchain") or {"available":False,"rpc_source":"none"}}
         if format=="json": return out
         if format=="html": return HTMLResponse(result_html(obj))
         if "text/html" in (request.headers.get("accept") or ""): return HTMLResponse(result_html(obj))
         return out
-    except Exception as e: return JSONResponse({"error":str(e)[:200],"mint":m,"status":"error"}, status_code=500)
+    except Exception as e:
+        if want_html and format!="json": return HTMLResponse(error_html("Oops, blob tripped! 🧸", "Something went wrong on our side. Try again in 30 seconds — if it keeps happening, check /health.", m, 500), status_code=500)
+        return JSONResponse({"error":str(e)[:200],"mint":m,"status":"error"}, status_code=500)
     finally:
         try: lock.release()
         except: pass
@@ -505,35 +746,39 @@ def ledger(request: Request, limit: int=50):
     return {"n":len(out),"items":out}
 @app.get("/calibration")
 def calibration():
-    rows=up_lrange("ledger",0,-1); bins=defaultdict(lambda: {"n":0,"bad":0})
+    # REAL calibration: uses outcomes list (24h real price/liq) - not verdict proxy
+    rows=up_lrange("outcomes",0,-1); bins=defaultdict(lambda: {"n":0,"bad":0})
     for r in rows:
-        try: o=json.loads(r); s=float(o.get("risk_score") or 0); b=int(s//10*10); bins[b]["n"]+=1
+        try: o=json.loads(r); s=float(o.get("risk_score") or 0); b=int(s//10*10); bins[b]["n"]+=1; bins[b]["bad"]+= (1 if o.get("is_bad") else 0)
         except: pass
     out=[]
     for b in sorted(bins):
         n=bins[b]["n"]; bad=bins[b]["bad"]; p=bad/n if n else 0; lo,hi=wilson_ci(bad,n)
         out.append({"score_bin":b,"n":n,"bad":bad,"p_bad":round(p,4),"ci":[round(lo,4),round(hi,4)]})
-    return {"version":VERSION,"bins":out}
+    if not out:
+        return {"version":VERSION,"bins":[],"note":"No 24h outcomes yet - collecting. p_bad_24h is estimate until we have 20+ outcomes. Run /cron/outcome hourly.","outcomes_n":0}
+    return {"version":VERSION,"bins":out,"source":"real_24h_outcomes","outcomes_n":sum(b["n"] for b in out)}
 @app.get("/walkforward")
 def walkforward(request: Request):
     if not _need_key(request): return JSONResponse({"error":"unauthorized"}, status_code=401)
     rows=[]
-    for r in up_lrange("ledger",0,-1):
-        try: rows.append(json.loads(r))
+    for r in up_lrange("outcomes",0,-1):
+        try:
+            o=json.loads(r); o["ts"]=o.get("snap_ts") or o.get("check_ts"); rows.append(o)
         except: pass
     rows=sorted(rows, key=lambda x: x.get("ts") or 0)
-    if len(rows)<40: return {"error":"not enough data","n":len(rows)}
+    if len(rows)<40: return {"error":"not enough real outcomes yet","n":len(rows),"note":"Walk-forward now needs 40+ real 24h outcomes, not verdict proxy. Keep /cron/outcome running hourly."}
     cut=int(len(rows)*0.7); train,test=rows[:cut],rows[cut:]
     def metrics(data, thr=35):
         tp=fp=tn=fn=0
         for o in data:
-            pred=float(o.get("risk_score") or 0)>=thr; actual=(o.get("verdict")=="avoid")
+            pred=float(o.get("risk_score") or 0)>=thr; actual=bool(o.get("is_bad"))
             if pred and actual: tp+=1
             elif pred and not actual: fp+=1
             elif not pred and not actual: tn+=1
             else: fn+=1
         prec=tp/(tp+fp) if tp+fp else 0; rec=tp/(tp+fn) if tp+fn else 0
         return {"n":len(data),"tp":tp,"fp":fp,"tn":tn,"fn":fn,"precision":round(prec,4),"recall":round(rec,4)}
-    return {"n":len(rows),"train":metrics(train),"test":metrics(test),"threshold":35,"note":"Using verdict=avoid as proxy until 24h outcome is available"}
+    return {"n":len(rows),"train":metrics(train),"test":metrics(test),"threshold":35,"note":"Using real 24h outcomes: bad = price -50% or liquidity -70% or pair gone within 24h+"}
 @app.get("/rules")
 def rules(): return {"version":VERSION,"note":"rules are private"}
