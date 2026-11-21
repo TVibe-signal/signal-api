@@ -623,3 +623,36 @@ try:
     print(f"[fix-notfound] front routes now: {_after}")
 except Exception as _e:
     print(f"[fix-notfound] FAILED: {_e}")
+
+
+# --- FIX CRON 404: /cron/outcome bi catch-all /{mint} /{path} nuot ---
+# Ly do 404: core_final co route catch-all /{mint} va /{path:path} o cuoi.
+# Neu /cron/outcome nam SAU catch-all, FastAPI se match /cron/outcome vao catch-all truoc
+# -> tra ve 404 Not Found, khong phai 401 sai key. Sai key phai la 401.
+# Fix: dua tat ca route he thong + cron len truoc catch-all.
+try:
+    _routes_cron = list(getattr(app.router, "routes", []) or [])
+    _paths_cron = [getattr(r, "path", "") for r in _routes_cron]
+    print(f"[fix-cron404] before: /cron/outcome exists={('/cron/outcome' in _paths_cron)} total={len(_routes_cron)}")
+    # Cac route phai luon o truoc catch-all
+    _want_cron = ["/cron/outcome", "/ping", "/health", "/pro", "/pro_json", "/pro_status", "/compare", "/batch", "/omni_pro", "/check", "/stats", "/export", "/"]
+    # Move in reverse so final order is _want_cron
+    for _p in reversed(_want_cron):
+        _idxs = [i for i, r in enumerate(_routes_cron) if getattr(r, "path", "") == _p]
+        if _idxs:
+            _r = _routes_cron.pop(_idxs[-1])
+            _routes_cron.insert(0, _r)
+            print(f"[fix-cron404] moved {_p} to front")
+    try:
+        app.router.routes = _routes_cron
+    except Exception:
+        pass
+    try:
+        if getattr(app, "routes", None) is not app.router.routes:
+            app.routes = _routes_cron
+    except Exception:
+        pass
+    _after_cron = [getattr(r, "path", "") for r in _routes_cron[:15]]
+    print(f"[fix-cron404] front routes now: {_after_cron}")
+except Exception as _e:
+    print(f"[fix-cron404] FAILED: {_e}")
