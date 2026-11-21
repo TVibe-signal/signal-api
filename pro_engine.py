@@ -728,6 +728,8 @@ def score(pair: dict, h: dict, a: dict, d: dict, lp: dict, now: float | None = N
             grade, verdict, label = "D", "avoid", "SELL"; capped_by = "permanent_delegate"
         if "mint_active" in flags and "freeze_active" in flags and verdict == "ok":
             grade, verdict, label = "C", "caution", "HOLD-BUY"; capped_by = "mint_and_freeze_active"
+        if lp.get("status") in ("unknown", "unverified") and verdict == "ok":
+            grade, verdict, label = "C", "caution", "HOLD-BUY"; capped_by = "lp_unverified"
         if "whale_50pct" in flags and verdict == "ok":
             grade, verdict, label = "C", "caution", "HOLD-BUY"; capped_by = "whale_50pct"
     if capped_by:
@@ -762,6 +764,8 @@ def score(pair: dict, h: dict, a: dict, d: dict, lp: dict, now: float | None = N
         why = "Do not buy. LP + Dev unknown, token very new."
     elif "vol_liq_wash" in mf:
         why = "Volume looks washed vs liquidity. Small size only."
+    elif capped_by == "lp_unverified":
+        why = "Not a clear yes: LP lock could not be verified, so liquidity might be pulled. Small size only."
     elif verdict == "caution":
         why = "Mixed. Small size only."
     elif verdict == "avoid":

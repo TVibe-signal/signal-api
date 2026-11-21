@@ -262,6 +262,15 @@ def test_unsupported_dex_is_marked_unverified():
     assert r["lp_lock"]["status"] == "unverified" and "lp_unverified_dex" in r["flags"]
 
 
+def test_unverified_lp_can_never_be_pass():
+    fresh()
+    fake.pairs = [Fake.pair(dex="pumpswap")]
+    r = pe.analyze(MINT)
+    assert r["lp_lock"]["status"] == "unverified"
+    assert r["verdict"] == "caution" and r["label"] == "HOLD-BUY" and r["action"] == "review"
+    assert r["verdict_capped_by"] == "lp_unverified"
+
+
 def test_low_liquidity_forces_avoid():
     fresh()
     fake.pairs = [Fake.pair(liq=500)]

@@ -101,7 +101,7 @@ def _apply_pro_v43_inline(g):
     def pro_premium(mint):
         return _pe.analyze(mint)
     from fastapi import Query
-    from fastapi.responses import JSONResponse, HTMLResponse, FileResponse
+    from fastapi.responses import JSONResponse, HTMLResponse, Response
     def _guard(request, cost=1):
         ok, retry, scope = _pe.allow_request(_pe.client_ip(request), cost)
         if ok:
@@ -121,17 +121,20 @@ def _apply_pro_v43_inline(g):
                 "engine": _pe.status(),
                 "note": "PRO engine v45: owner-resolved holders, oldest-tx creator, burn-only LP safe, unverified when data is missing"}
 
-    _ASSET_RE = re.compile(r"^blob-[0-9a-f]{10}\.png$")
+    try:
+        import blobs_data as _bd
+        _ASSETS = _bd.assets()
+    except Exception as e:  # missing sprites must never take the site down
+        print("[pro_v45] blobs_data not loaded:", type(e).__name__)
+        _ASSETS = {}
 
     @app.get("/assets/{fname}")
     def _asset(fname: str):
-        if not _ASSET_RE.match(fname):
+        body = _ASSETS.get(fname)
+        if body is None:
             return JSONResponse({"error": "not_found"}, status_code=404)
-        p = os.path.join(ROOT, "assets", fname)
-        if not os.path.isfile(p):
-            return JSONResponse({"error": "not_found"}, status_code=404)
-        return FileResponse(p, media_type="image/png",
-                            headers={"Cache-Control": "public, max-age=31536000, immutable"})
+        return Response(content=body, media_type="image/png",
+                        headers={"Cache-Control": "public, max-age=31536000, immutable"})
 
     @app.get("/pro")
     def pro_html(request: Request, mint: str = Query(default="")):
@@ -163,15 +166,18 @@ def _apply_pro_v43_inline(g):
         try: age_s=f"{float(age):.1f}h"
         except: age_s=str(age or "?")
         # 7 blob runners for pro page - reuse same blob images (injected via placeholder, replaced below)
-        blobs_html_pro = """<div class='blob-run' style='animation:wanderLR 11s linear infinite;animation-delay:0s'><img src='/assets/blob-5406cf7843.png' style='width:62px;height:auto;display:block' alt='blob teal'></div>
-<div class='blob-run' style='animation:wanderRL 13s linear infinite;animation-delay:-2s'><img src='/assets/blob-9a83c61405.png' style='width:56px;height:auto;display:block' alt='blob orange'></div>
-<div class='blob-run' style='animation:wanderLR 12s linear infinite;animation-delay:-4s'><img src='/assets/blob-1db680f448.png' style='width:66px;height:auto;display:block' alt='blob purple'></div>
-<div class='blob-run' style='animation:orbit 16s linear infinite;animation-delay:-1s'><img src='/assets/blob-b5ba2dfede.png' style='width:58px;height:auto;display:block' alt='blob blue'></div>
-<div class='blob-run' style='animation:wanderRL 11.5s linear infinite;animation-delay:-6s'><img src='/assets/blob-b9aa4d9a62.png' style='width:60px;height:auto;display:block' alt='blob green'></div>
-<div class='blob-run' style='animation:wanderLR 14s linear infinite;animation-delay:-3s'><img src='/assets/blob-1495e2fe71.png' style='width:54px;height:auto;display:block' alt='blob pink'></div>
-<div class='blob-run' style='animation:wanderRL 12.5s linear infinite;animation-delay:-8s'><img src='/assets/blob-4b0ce8cb62.png' style='width:62px;height:auto;display:block' alt='blob yellow'></div>
-<div class='blob-run' style='animation:wanderLR 13.5s linear infinite;animation-delay:-5s'><img src='/assets/blob-80bfeec6c9.png' style='width:60px;height:auto;display:block' alt='blob red'></div>
-<div class='blob-run' style='animation:orbit 18s linear infinite;animation-delay:-7s'><img src='/assets/blob-ddb63a1dc0.png' style='width:64px;height:auto;display:block' alt='blob brown'></div>
+        blobs_html_pro = """<div class='blob-run' style='animation:wanderLR 11s linear infinite;animation-delay:0s'><img src='/assets/blob-teal-8d15f2e1.png' style='width:62px;height:auto;display:block' alt='blob teal'></div>
+<div class='blob-run' style='animation:wanderRL 13s linear infinite;animation-delay:-2s'><img src='/assets/blob-orange-c26ee3d7.png' style='width:56px;height:auto;display:block' alt='blob orange'></div>
+<div class='blob-run' style='animation:wanderLR 12s linear infinite;animation-delay:-4s'><img src='/assets/blob-purple-cae93e48.png' style='width:66px;height:auto;display:block' alt='blob purple'></div>
+<div class='blob-run' style='animation:orbit 16s linear infinite;animation-delay:-1s'><img src='/assets/blob-blue-8d56fc09.png' style='width:58px;height:auto;display:block' alt='blob blue'></div>
+<div class='blob-run' style='animation:wanderRL 11.5s linear infinite;animation-delay:-6s'><img src='/assets/blob-green-5e051ed0.png' style='width:60px;height:auto;display:block' alt='blob green'></div>
+<div class='blob-run' style='animation:wanderLR 14s linear infinite;animation-delay:-3s'><img src='/assets/blob-pink-ae3ad34c.png' style='width:54px;height:auto;display:block' alt='blob pink'></div>
+<div class='blob-run' style='animation:wanderRL 12.5s linear infinite;animation-delay:-8s'><img src='/assets/blob-yellow-0d4d7f3b.png' style='width:62px;height:auto;display:block' alt='blob yellow'></div>
+<div class='blob-run' style='animation:wanderLR 13.5s linear infinite;animation-delay:-5s'><img src='/assets/blob-red-db3f8b46.png' style='width:60px;height:auto;display:block' alt='blob red'></div>
+<div class='blob-run' style='animation:orbit 18s linear infinite;animation-delay:-7s'><img src='/assets/blob-brown-e3bfb08e.png' style='width:64px;height:auto;display:block' alt='blob brown'></div>
+<div class='blob-run' style='animation:wanderRL 12s linear infinite;animation-delay:-9s'><img src='/assets/blob-tri-99a2196e.png' style='width:58px;height:auto;display:block' alt='blob orange triangle'></div>
+<div class='blob-run' style='animation:wanderLR 15s linear infinite;animation-delay:-10s'><img src='/assets/blob-cyan-5ac597cb.png' style='width:56px;height:auto;display:block' alt='blob cyan'></div>
+<div class='blob-run' style='animation:orbit 17s linear infinite;animation-delay:-4s'><img src='/assets/blob-lavender-7a873c9f.png' style='width:54px;height:auto;display:block' alt='blob lavender'></div>
 """
         # Human reasons - plain English for normal buyers, not pros
         try: age_f=999 if age is None else float(age)
@@ -396,7 +402,7 @@ table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;padd
 <div class='card' id='check' style='margin-top:14px'><h3>Check a token</h3><form action='/pro' method='get' class='row'><input id='mint' name='mint' placeholder='Enter a Solana mint address...'><button class='check'>CHECK</button></form><p class='ex'>Example: paste a mint from DexScreener, Phantom or your wallet. Try one you know.</p><div class='try'><a href="javascript:fill('DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263')">Try example mint</a><a href='/pro'>PRO</a><a href='/pro_status'>Pro Status</a><a href='/health'>Health</a><a href='#agents'>Agent JSON</a></div></div>
 <div class='stats'><div class='stat'><b>Live</b><span>Real price + liquidity</span></div><div class='stat'><b>6 checks</b><span>Market / Holder / LP / Dev</span></div><div class='stat'><b>No key</b><span>No signup needed</span></div><div class='stat'><b>Agent</b><span>JSON in 1 call</span></div></div>
 </div>
-<div><div class='blobbox'><div class='pile' style='height:auto;text-align:center'><img src='/assets/blob-018b1f1bbc.png' style='width:100%;max-width:360px;height:auto;display:block;margin:0 auto' alt='TVibe blobs'></div><div class='verdict'>PASS - HOLD-BUY - SELL</div><div class='mini-live'><b>What you get in 1 check</b><p>Grade A-F + 5 breakdowns: Market / Holder / LP / Dev / Authority. Plus flags: low liquidity, top holder, unlocked LP, mint still on, dev selling.</p></div></div></div>
+<div><div class='blobbox'><div class='pile' style='height:auto;text-align:center'><img src='/assets/hero-70e33fe3.png' style='width:100%;max-width:360px;height:auto;display:block;margin:0 auto' alt='TVibe blobs'></div><div class='verdict'>PASS - HOLD-BUY - SELL</div><div class='mini-live'><b>What you get in 1 check</b><p>Grade A-F + 5 breakdowns: Market / Holder / LP / Dev / Authority. Plus flags: low liquidity, top holder, unlocked LP, mint still on, dev selling.</p></div></div></div>
 </div>
 
 <div class='sec' id='what'><h2>What PRO checks</h2><p class='lead'>Not just price. We check if you can sell, who controls it, and if the dev can rug.</p><div class='grid3'>
@@ -465,15 +471,18 @@ PASS does not mean safe.</div><button class='btn' onclick="copyTxt('prompt')">Co
 <div class='foot'><span>2026 TVibe - Check a token before you buy.</span><span>Data is real. Not financial advice. PASS does not mean safe.</span></div>
 </div>
 <div class='blob-layer'>
-<div class='blob-run' style='animation:wanderLR 11s linear infinite;animation-delay:0s'><img src='/assets/blob-5406cf7843.png' style='width:62px;height:auto;display:block' alt='blob teal'></div>
-<div class='blob-run' style='animation:wanderRL 13s linear infinite;animation-delay:-2s'><img src='/assets/blob-9a83c61405.png' style='width:56px;height:auto;display:block' alt='blob orange'></div>
-<div class='blob-run' style='animation:wanderLR 12s linear infinite;animation-delay:-4s'><img src='/assets/blob-1db680f448.png' style='width:66px;height:auto;display:block' alt='blob purple'></div>
-<div class='blob-run' style='animation:orbit 16s linear infinite;animation-delay:-1s'><img src='/assets/blob-b5ba2dfede.png' style='width:58px;height:auto;display:block' alt='blob blue'></div>
-<div class='blob-run' style='animation:wanderRL 11.5s linear infinite;animation-delay:-6s'><img src='/assets/blob-b9aa4d9a62.png' style='width:60px;height:auto;display:block' alt='blob green'></div>
-<div class='blob-run' style='animation:wanderLR 14s linear infinite;animation-delay:-3s'><img src='/assets/blob-1495e2fe71.png' style='width:54px;height:auto;display:block' alt='blob pink'></div>
-<div class='blob-run' style='animation:wanderRL 12.5s linear infinite;animation-delay:-8s'><img src='/assets/blob-4b0ce8cb62.png' style='width:62px;height:auto;display:block' alt='blob yellow'></div>
-<div class='blob-run' style='animation:wanderLR 13.5s linear infinite;animation-delay:-5s'><img src='/assets/blob-80bfeec6c9.png' style='width:60px;height:auto;display:block' alt='blob red'></div>
-<div class='blob-run' style='animation:orbit 18s linear infinite;animation-delay:-7s'><img src='/assets/blob-ddb63a1dc0.png' style='width:64px;height:auto;display:block' alt='blob brown'></div>
+<div class='blob-run' style='animation:wanderLR 11s linear infinite;animation-delay:0s'><img src='/assets/blob-teal-8d15f2e1.png' style='width:62px;height:auto;display:block' alt='blob teal'></div>
+<div class='blob-run' style='animation:wanderRL 13s linear infinite;animation-delay:-2s'><img src='/assets/blob-orange-c26ee3d7.png' style='width:56px;height:auto;display:block' alt='blob orange'></div>
+<div class='blob-run' style='animation:wanderLR 12s linear infinite;animation-delay:-4s'><img src='/assets/blob-purple-cae93e48.png' style='width:66px;height:auto;display:block' alt='blob purple'></div>
+<div class='blob-run' style='animation:orbit 16s linear infinite;animation-delay:-1s'><img src='/assets/blob-blue-8d56fc09.png' style='width:58px;height:auto;display:block' alt='blob blue'></div>
+<div class='blob-run' style='animation:wanderRL 11.5s linear infinite;animation-delay:-6s'><img src='/assets/blob-green-5e051ed0.png' style='width:60px;height:auto;display:block' alt='blob green'></div>
+<div class='blob-run' style='animation:wanderLR 14s linear infinite;animation-delay:-3s'><img src='/assets/blob-pink-ae3ad34c.png' style='width:54px;height:auto;display:block' alt='blob pink'></div>
+<div class='blob-run' style='animation:wanderRL 12.5s linear infinite;animation-delay:-8s'><img src='/assets/blob-yellow-0d4d7f3b.png' style='width:62px;height:auto;display:block' alt='blob yellow'></div>
+<div class='blob-run' style='animation:wanderLR 13.5s linear infinite;animation-delay:-5s'><img src='/assets/blob-red-db3f8b46.png' style='width:60px;height:auto;display:block' alt='blob red'></div>
+<div class='blob-run' style='animation:orbit 18s linear infinite;animation-delay:-7s'><img src='/assets/blob-brown-e3bfb08e.png' style='width:64px;height:auto;display:block' alt='blob brown'></div>
+<div class='blob-run' style='animation:wanderRL 12s linear infinite;animation-delay:-9s'><img src='/assets/blob-tri-99a2196e.png' style='width:58px;height:auto;display:block' alt='blob orange triangle'></div>
+<div class='blob-run' style='animation:wanderLR 15s linear infinite;animation-delay:-10s'><img src='/assets/blob-cyan-5ac597cb.png' style='width:56px;height:auto;display:block' alt='blob cyan'></div>
+<div class='blob-run' style='animation:orbit 17s linear infinite;animation-delay:-4s'><img src='/assets/blob-lavender-7a873c9f.png' style='width:54px;height:auto;display:block' alt='blob lavender'></div>
 </div>
 
 </body></html>
