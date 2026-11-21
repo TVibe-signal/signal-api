@@ -733,3 +733,110 @@ try:
     print(f"[fix-cron404] front routes now: {_after_cron}")
 except Exception as _e:
     print(f"[fix-cron404] FAILED: {_e}")
+
+
+# --- RESCUE v44: ALL fixed routes BEFORE catch-all /{mint} /{path:path} ---
+# Root cause of /omni + /pro 404: core_final registers /{mint} and /{path:path}.
+# Any route registered AFTER those is unreachable → plain "Not Found".
+try:
+    _rt = list(getattr(app.router, "routes", []) or [])
+
+    def _is_catch(r):
+        p = (getattr(r, "path", None) or "").rstrip("/")
+        # path templates
+        raw = getattr(r, "path", None) or ""
+        if raw in ("/{mint}", "/{path:path}", "/{path}"):
+            return True
+        if "path:path" in raw:
+            return True
+        if raw == "/{mint}":
+            return True
+        return False
+
+    _fixed, _catch = [], []
+    for _r in _rt:
+        (_catch if _is_catch(_r) else _fixed).append(_r)
+
+    # Stable priority for agent + PRO + health (first match wins among equals)
+    _prio = [
+        "/omni", "/signal", "/signals", "/stats", "/health", "/mcp", "/ping",
+        "/pro", "/pro_json", "/pro_status", "/omni_pro", "/compare", "/batch", "/check",
+        "/cron/outcome", "/export", "/ledger", "/methodology", "/history",
+        "/llms.txt", "/skill.json", "/rules", "/agent/playbook", "/docs", "/openapi.json",
+        "/",
+    ]
+    _rank = {p: i for i, p in enumerate(_prio)}
+
+    def _sort_key(r):
+        p = getattr(r, "path", "") or ""
+        return (_rank.get(p, 500), p)
+
+    _fixed_sorted = sorted(_fixed, key=_sort_key)
+    _new = _fixed_sorted + _catch
+    try:
+        app.router.routes[:] = _new
+    except Exception:
+        app.router.routes = _new
+    try:
+        if getattr(app, "routes", None) is not app.router.routes:
+            app.routes = list(app.router.routes)
+    except Exception:
+        pass
+    _front = [getattr(r, "path", "") for r in list(app.router.routes)[:20]]
+    _has_omni = any(getattr(r, "path", "") == "/omni" for r in app.router.routes)
+    print(f"[rescue-v44] routes={len(_new)} catch={len(_catch)} omni_present={_has_omni}")
+    print(f"[rescue-v44] front={_front}")
+except Exception as _e:
+    print(f"[rescue-v44] FAILED: {_e}")
+
+
+# --- RESCUE: /stats never hard-500 for public UI ---
+try:
+    from fastapi import Request
+    from fastapi.responses import JSONResponse
+    import inspect as _inspect_v44
+
+    _stats_ep = None
+    for _r in list(getattr(app.router, "routes", []) or []):
+        if getattr(_r, "path", None) == "/stats" and hasattr(_r, "endpoint"):
+            _stats_ep = _r.endpoint
+            _stats_route = _r
+            break
+
+    if _stats_ep is not None:
+        async def _stats_soft(request: Request = None):
+            try:
+                if request is not None and "request" in str(_inspect_v44.signature(_stats_ep)):
+                    out = await _stats_ep(request)
+                else:
+                    try:
+                        out = await _stats_ep()
+                    except TypeError:
+                        out = await _stats_ep(request)
+                return out
+            except Exception as e:
+                return JSONResponse(
+                    {
+                        "available": False,
+                        "error": "stats_partial",
+                        "detail": str(e)[:200],
+                        "hint": "Try /pro_json?mint=… or /health; track-record recovering",
+                        "nfa": True,
+                    },
+                    status_code=200,
+                )
+
+        _stats_route.endpoint = _stats_soft
+        dep = getattr(_stats_route, "dependant", None)
+        if dep is not None:
+            try:
+                dep.call = _stats_soft
+            except Exception:
+                pass
+        print("[rescue-v44] /stats soft-wrapper installed")
+    else:
+        print("[rescue-v44] /stats route not found to wrap")
+except Exception as _e:
+    print(f"[rescue-v44] stats wrap FAILED: {_e}")
+
+print("[rescue-v44] done")
