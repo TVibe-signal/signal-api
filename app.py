@@ -193,58 +193,102 @@ def _apply_pro_v43_inline(g):
         try: age_h=(time.time() - float(pair.get("pairCreatedAt") or 0)/1000)/3600
         except: age_h=0
         h=get_holders(mint); a=get_auth(mint); d=get_creator(mint, (h.get("top_holders") if h else None)); l=get_lp(pair, mint)
-        # Breakdown scores
+        # Breakdown scores - STRICT v44 (fix: unknown != good, age + vol/liq count)
+        # Market: liq + dump + age + vol/liq ratio
         mkt=0; mkt_flags=[]
-        if liq<1000: mkt+=30; mkt_flags.append("low_liquidity")
-        elif liq<10000: mkt+=15; mkt_flags.append("thin_liquidity")
+        if liq<1000: mkt+=25; mkt_flags.append("low_liquidity")
+        elif liq<5000: mkt+=18; mkt_flags.append("thin_liquidity")
+        elif liq<15000: mkt+=10; mkt_flags.append("thin_liquidity")
+        elif liq<30000: mkt+=5; mkt_flags.append("low_liq_vs_vol")
+        elif liq<50000: mkt+=2
         if ch<=-50: mkt+=20; mkt_flags.append("dump_50pct")
-        elif ch<=-20: mkt+=10; mkt_flags.append("dump_20pct")
-        if age_h<1: mkt+=10; mkt_flags.append("very_new")
+        elif ch<=-30: mkt+=12; mkt_flags.append("dump_30pct")
+        elif ch<=-15: mkt+=7; mkt_flags.append("dump_15pct")
+        # Age: truoc chi tru <1h, nay token <24h da tru
+        if age_h<1: mkt+=15; mkt_flags.append("very_new")
+        elif age_h<6: mkt+=12; mkt_flags.append("very_new")
+        elif age_h<24: mkt+=8; mkt_flags.append("new_token")
+        elif age_h<72: mkt+=5; mkt_flags.append("new_token")
+        elif age_h<168: mkt+=2
+        # Vol/Liq ratio: truoc khong tinh, nay wash/pump bi tru
+        _ratio=(vol/liq) if liq>0 else 0
+        if _ratio>30: mkt+=6; mkt_flags.append("vol_liq_wash")
+        elif _ratio>15: mkt+=5; mkt_flags.append("vol_liq_high")
+        elif _ratio>8: mkt+=4; mkt_flags.append("vol_liq_high")
+        elif _ratio>4: mkt+=2
+        mkt=min(mkt, 32)
+        # Holder: ha nguong - truoc t1>30, t10>50 moi tru
         hold=0; hold_flags=[]
         if h.get("available"):
             t1=h.get("top1_pct") or 0; t10=h.get("top10_pct") or 0
-            if t1>50: hold+=30; hold_flags.append("whale_50pct")
+            if t1>50: hold+=25; hold_flags.append("whale_50pct")
             elif t1>30: hold+=18; hold_flags.append("high_concentration")
+            elif t1>20: hold+=12; hold_flags.append("high_concentration")
+            elif t1>15: hold+=6; hold_flags.append("top1_15pct")
+            elif t1>10: hold+=3
             if t10>70: hold+=15; hold_flags.append("top10_70pct")
+            elif t10>60: hold+=12; hold_flags.append("top10_60pct")
             elif t10>50: hold+=8; hold_flags.append("top10_50pct")
+            elif t10>40: hold+=5; hold_flags.append("top10_40pct")
+            elif t10>35: hold+=3
+        else:
+            hold+=8; hold_flags.append("holders_unknown")
+        hold=min(hold, 28)
+        # LP: unknown 10 -> 18, unlocked giu 25
         lp_s=0; lp_flags=[]
         if l.get("available"):
             if l.get("status")=="unlocked": lp_s+=25; lp_flags.append("lp_not_locked")
-            elif l.get("status")=="partial": lp_s+=12; lp_flags.append("lp_partial")
+            elif l.get("status")=="partial": lp_s+=14; lp_flags.append("lp_partial")
             elif l.get("status") in ("locked","burned"): lp_flags.append("lp_locked")
-            else: lp_s+=10; lp_flags.append("lp_unknown")
-        else: lp_s+=10; lp_flags.append("lp_unknown")
+            else: lp_s+=18; lp_flags.append("lp_unknown")
+        else: lp_s+=18; lp_flags.append("lp_unknown")
+        # Dev: unknown 0 -> 12, truoc unknown = 0 la sai
         dev_s=0; dev_flags=[]
         if d.get("available"):
             dh=d.get("dev_holds_pct")
-            if dh is not None and dh>20: dev_s+=20; dev_flags.append("dev_holds_large")
-            elif dh is not None and dh>10: dev_s+=10; dev_flags.append("dev_holds_medium")
-            if (d.get("tx_count") or 99)<5: dev_s+=5; dev_flags.append("new_dev")
+            if dh is not None and dh>20: dev_s+=15; dev_flags.append("dev_holds_large")
+            elif dh is not None and dh>10: dev_s+=8; dev_flags.append("dev_holds_medium")
+            elif dh is not None and dh>5: dev_s+=4; dev_flags.append("dev_holds_small")
+            elif dh is None: dev_s+=8; dev_flags.append("dev_holds_unknown")
+            if (d.get("tx_count") or 99)<5: dev_s+=8; dev_flags.append("new_dev")
+            elif (d.get("tx_count") or 99)<20: dev_s+=3; dev_flags.append("new_dev")
+        else:
+            dev_s+=12; dev_flags.append("dev_unknown")
+        # Authority: unknown 0 -> 8
         auth_s=0; auth_flags=[]
         if a.get("available"):
-            if a.get("mint_authority") is not None: auth_s+=10; auth_flags.append("mint_active")
-            if a.get("freeze_authority") is not None: auth_s+=12; auth_flags.append("freeze_active")
+            if a.get("mint_authority") is not None: auth_s+=8; auth_flags.append("mint_active")
+            if a.get("freeze_authority") is not None: auth_s+=10; auth_flags.append("freeze_active")
             if a.get("renounced"): auth_flags.append("authorities_renounced")
+            if a.get("mint_authority") is None and a.get("freeze_authority") is None and not a.get("renounced"):
+                auth_s+=8; auth_flags.append("authority_unknown")
+        else:
+            auth_s+=8; auth_flags.append("authority_unknown")
         total=max(0,min(100, mkt+hold+lp_s+dev_s+auth_s))
-        if total<=20: grade="A"; verdict="ok"; label="PASS"
-        elif total<=35: grade="B"; verdict="ok"; label="PASS"
-        elif total<=55: grade="C"; verdict="caution"; label="HOLD-BUY"
-        elif total<=75: grade="D"; verdict="avoid"; label="SELL"
+        # Grade: siet lai - truoc PASS toi 35, nay PASS chi toi 30, A chi toi 15
+        if total<=15: grade="A"; verdict="ok"; label="PASS"
+        elif total<=30: grade="B"; verdict="ok"; label="PASS"
+        elif total<=50: grade="C"; verdict="caution"; label="HOLD-BUY"
+        elif total<=70: grade="D"; verdict="avoid"; label="SELL"
         else: grade="F"; verdict="avoid"; label="SELL"
-        # Advanced risks
+        # Advanced risks - siet lai
         t1v=h.get("top1_pct") or 0; t10v=h.get("top10_pct") or 0; dhv=d.get("dev_holds_pct") or 0
-        if t1v>30 and t10v>70 and dhv>10: bundle="high"
-        elif t10v>50: bundle="medium"
+        if t1v>30 and t10v>60: bundle="high"
+        elif t10v>40 or t1v>15: bundle="medium"
         else: bundle="low"
         if a.get("freeze_authority") is not None and l.get("status")=="unlocked": honey="high"
         elif a.get("freeze_authority") is not None: honey="medium"
+        elif "lp_unknown" in lp_flags and "authority_unknown" in auth_flags: honey="medium"
         else: honey="low"
-        if age_h<1 and t1v>30: sniper="high"
-        elif age_h<24 and t1v>30: sniper="medium"
+        if age_h<6 and t1v>15: sniper="high"
+        elif age_h<24 and t1v>15: sniper="medium"
+        elif age_h<72 and t1v>20: sniper="medium"
         else: sniper="low"
-        if grade=="F": why="Do not buy. Multiple risks."
+        if grade=="F": why="Do not buy. Multiple risks + too many unknowns."
         elif "whale_50pct" in hold_flags: why="Do not buy. One wallet holds 50%+."
         elif "lp_not_locked" in lp_flags: why="Do not buy. LP not locked."
+        elif "lp_unknown" in lp_flags and "dev_unknown" in dev_flags: why="Do not buy. LP + Dev unknown, token very new."
+        elif "vol_liq_wash" in mkt_flags: why="Volume looks washed vs liquidity. Small size only."
         elif verdict=="caution": why="Mixed. Small size only."
         else: why="Looks OK on these checks. PASS does not mean safe."
         return {"mint":mint,"symbol":(pair.get("baseToken") or {}).get("symbol") or "?","name":(pair.get("baseToken") or {}).get("name") or "","price_usd":float(pair.get("priceUsd") or 0),"liquidity_usd":liq,"volume_24h":vol,"change_24h_pct":ch,"age_h":round(age_h,1),"pairAddress":pair.get("pairAddress"),"risk_score":total,"grade":grade,"verdict":verdict,"label":label,"why":why,"breakdown":{"market":mkt,"holder":hold,"lp":lp_s,"dev":dev_s,"authority":auth_s},"flags":mkt_flags+hold_flags+lp_flags+dev_flags+auth_flags,"holders":h,"lp_lock":l,"dev":d,"onchain":a,"risks":{"bundle":bundle,"honeypot":honey,"sniper":sniper},"disclaimer":"PASS does not mean safe. Always check yourself."}
