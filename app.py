@@ -321,64 +321,127 @@ try:
 <!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>
 <title>TVibe - Check a token before you buy</title>
 <style>
-*{box-sizing:border-box}body{margin:0;background:#FFF8E6;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#1a1a1a}
-a{color:inherit}.top{max-width:1080px;margin:0 auto;padding:14px 16px;display:flex;align-items:center;justify-content:space-between}
-.logo{font-weight:900;font-size:22px;letter-spacing:-.5px}.logo span{color:#FF5A5A}.nav{display:flex;gap:18px;font-size:13px;color:#555}.nav a{text-decoration:none}
-.hero{max-width:1080px;margin:0 auto;padding:10px 16px 0;display:grid;grid-template-columns:1.05fr .95fr;gap:18px;align-items:start}
-h1{font-size:48px;line-height:1.02;margin:10px 0 10px;letter-spacing:-1.5px}.sub{color:#555;font-size:15px;line-height:1.6;margin:0 0 12px}
-.pills{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}.pill{font-size:12px;background:#fff;border:1px solid #eee;border-radius:999px;padding:6px 10px}
-.card{background:#fff;border-radius:18px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.06);border:1px solid #f0e6c8}
-.card h3{margin:0 0 10px}.row{display:flex;gap:8px}input{flex:1;padding:12px;border-radius:12px;border:1.5px solid #eee;font-size:14px;outline:none}input:focus{border-color:#111}
-button{background:#111;color:#fff;border:0;padding:12px 16px;border-radius:12px;font-weight:800;cursor:pointer}
-.ex{font-size:12px;color:#777;margin:10px 0 0}.try{display:flex;gap:8px;margin-top:10px}.try a{font-size:12px;background:#FFF6C9;border:1px solid #eee;border-radius:999px;padding:6px 10px;text-decoration:none}
-.blobbox{background:#FFF6C9;border-radius:20px;padding:16px;position:relative;overflow:hidden}
-.pile{position:relative;height:260px}.pile-blob{position:absolute;border-radius:50% 50% 46% 54%;display:flex;align-items:center;justify-content:center;flex-direction:column;box-shadow:inset -6px -6px 0 rgba(0,0,0,.05)}
-.eyes{display:flex;gap:7px}.eye{width:7px;height:8px;background:#111;border-radius:50%}.mouth{width:12px;height:6px;border:2px solid #111;border-top:0;border-radius:0 0 10px 10px;margin-top:2px}
-.verdict{margin-top:12px;background:#111;color:#fff;border-radius:999px;padding:8px 12px;font-size:12px;font-weight:800;text-align:center;letter-spacing:.4px}
-.three{max-width:1080px;margin:16px auto 0;padding:0 16px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
-.mini{background:#fff;border-radius:16px;padding:14px;border:1px solid #f0e6c8}.mini b{font-size:14px}.mini p{margin:6px 0 0;font-size:13px;color:#666;line-height:1.5}
-.how{max-width:1080px;margin:16px auto 0;padding:0 16px}.how-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:10px}
-.agents{max-width:1080px;margin:16px auto 0;padding:0 16px}.code{background:#111;color:#E8FFB0;border-radius:14px;padding:14px;font-family:ui-monospace,monospace;font-size:12.5px;line-height:1.6;overflow:auto;white-space:pre}
-.foot{max-width:1080px;margin:16px auto 0;padding:0 16px 90px;display:flex;justify-content:space-between;font-size:12px;color:#888}
-.track{position:fixed;left:0;right:0;bottom:0;height:64px;background:transparent;pointer-events:none;overflow:hidden;z-index:50}
+*{box-sizing:border-box}body{margin:0;background:#FFF8E6;font-family:system-ui,-apple-system,Segoe UI,Roboto,Inter,sans-serif;color:#111;line-height:1.5}
+a{color:inherit}.top{position:sticky;top:0;z-index:100;background:rgba(255,248,230,.92);backdrop-filter:blur(8px);border-bottom:1px solid #F0E6C8}
+.top-in{max-width:1120px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;justify-content:space-between}
+.logo{font-weight:900;font-size:22px;letter-spacing:-.5px}.logo span{color:#FF5A5A}.nav{display:flex;gap:16px;font-size:13px;color:#444}.nav a{text-decoration:none}.nav a:hover{color:#000;font-weight:700}
+.btn{display:inline-block;background:#111;color:#fff;border-radius:999px;padding:8px 14px;font-size:13px;font-weight:800;text-decoration:none;border:0;cursor:pointer}
+.wrap{max-width:1120px;margin:0 auto;padding:0 16px}
+.hero{display:grid;grid-template-columns:1.08fr .92fr;gap:20px;padding:22px 0 10px;align-items:start}
+.eyebrow{font-size:11px;letter-spacing:1.2px;color:#888;font-weight:800}.hero h1{font-size:52px;line-height:.98;margin:10px 0 12px;letter-spacing:-1.8px}.hero h1 i{font-style:normal;color:#FF5A5A}.sub{color:#555;font-size:16px;line-height:1.6;margin:0 0 14px}
+.pills{display:flex;gap:8px;flex-wrap:wrap}.pill{font-size:12px;background:#fff;border:1px solid #EDE0B8;border-radius:999px;padding:6px 10px}
+.card{background:#fff;border-radius:20px;padding:18px;box-shadow:0 10px 30px rgba(0,0,0,.06);border:1px solid #F0E6C8}
+.card h3{margin:0 0 12px;font-size:18px}.row{display:flex;gap:8px}input{flex:1;padding:13px 14px;border-radius:12px;border:1.5px solid #EEE;font-size:14px;outline:none;min-width:0}input:focus{border-color:#111}
+button.check{background:#111;color:#fff;border:0;padding:13px 18px;border-radius:12px;font-weight:900;cursor:pointer;white-space:nowrap}
+.ex{font-size:12.5px;color:#777;margin:10px 0 0}.try{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.try a{font-size:12px;background:#FFF6C9;border:1px solid #EEE;border-radius:999px;padding:6px 10px;text-decoration:none}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:14px}.stat{background:#fff;border:1px solid #F0E6C8;border-radius:14px;padding:12px;text-align:center}.stat b{font-size:18px;display:block}.stat span{font-size:12px;color:#777}
+.blobbox{background:#FFF6C9;border-radius:22px;padding:16px;position:relative;overflow:hidden}.pile{height:268px}.verdict{background:#111;color:#fff;border-radius:999px;padding:9px 12px;font-size:12px;font-weight:800;text-align:center;letter-spacing:.4px;margin-top:8px}
+.mini-live{background:#fff;border-radius:14px;padding:12px;margin-top:12px;border:1px solid #F0E6C8}.mini-live b{font-size:13px}.mini-live p{font-size:12.5px;color:#666;margin:4px 0 0;line-height:1.5}
+.sec{padding:22px 0 0}.sec h2{font-size:28px;letter-spacing:-.8px;margin:0 0 6px}.sec p.lead{color:#666;margin:0 0 14px;font-size:14.5px}
+.grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.mini{background:#fff;border-radius:18px;padding:16px;border:1px solid #F0E6C8}.mini b{font-size:15px}.mini p{margin:6px 0 0;font-size:13.5px;color:#666;line-height:1.6}.mini .tag{font-size:11px;font-weight:800;letter-spacing:.6px;color:#FF5A5A}
+.verdicts{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}.v-pass{background:#E8FCE8;border:1.5px solid #9BE39B}.v-hold{background:#FFF6C9;border:1.5px solid #F0D060}.v-sell{background:#FFE8E8;border:1.5px solid #FF9AA2}
+.compare-box{background:#111;color:#fff;border-radius:20px;padding:18px}.compare-box input{background:#222;color:#fff;border-color:#333}.compare-box p{color:#BBB}
+.code{background:#111;color:#E8FFB0;border-radius:14px;padding:14px;font-family:ui-monospace,SFMono,monospace;font-size:12.5px;line-height:1.6;overflow:auto;white-space:pre-wrap}
+table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;padding:10px 8px;border-bottom:2px solid #EEE}td{padding:10px 8px;border-bottom:1px solid #F0E6C8;vertical-align:top}code{background:#FFF6C9;padding:2px 6px;border-radius:6px;font-size:12px}
+.faq details{background:#fff;border:1px solid #F0E6C8;border-radius:14px;padding:12px 14px;margin-bottom:8px}.faq summary{font-weight:800;cursor:pointer;font-size:14px}.faq p{color:#666;font-size:13.5px}
+.foot{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;font-size:12px;color:#888;padding:22px 0 90px}
+.track{position:fixed;left:0;right:0;bottom:0;height:64px;pointer-events:none;overflow:hidden;z-index:50}
 .runner{position:absolute;bottom:8px;left:-80px;animation:run 16s linear infinite}.rblob{width:46px;height:46px;border-radius:50% 50% 46% 54%;display:flex;align-items:center;justify-content:center;flex-direction:column;animation:jump .6s ease-in-out infinite alternate}
-@keyframes run{from{left:-80px}to{left:110%}}
-@keyframes jump{from{transform:translateY(0)}to{transform:translateY(-14px)}}
-@media(max-width:760px){.hero{grid-template-columns:1fr}h1{font-size:36px}.three,.how-grid{grid-template-columns:1fr}.nav{display:none}}
-</style></head>
+.eyes{display:flex;gap:7px}.eye{width:7px;height:8px;background:#111;border-radius:50%}.mouth{width:12px;height:6px;border:2px solid #111;border-top:0;border-radius:0 0 10px 10px;margin-top:2px}
+@keyframes run{from{left:-80px}to{left:110%}}@keyframes jump{from{transform:translateY(0)}to{transform:translateY(-14px)}}
+@media(max-width:820px){.hero{grid-template-columns:1fr}.hero h1{font-size:38px}.grid3,.verdicts,.stats{grid-template-columns:1fr}.grid2{grid-template-columns:1fr}.nav{display:none}}
+</style>
+<script>function fill(v){document.getElementById('mint').value=v;document.getElementById('mint').focus()}function copyTxt(id){var e=document.getElementById(id);navigator.clipboard.writeText(e.innerText);alert('Copied')}</script></head>
 <body>
-<div class='top'><div class='logo'>TVibe<span>.</span></div><div class='nav'><a href='#how'>How it works</a><a href='#what'>What we check</a><a href='#agents'>For Agents</a></div></div>
+<div class='top'><div class='top-in'><div class='logo'>TVibe<span>.</span></div><div class='nav'><a href='#what'>What we check</a><a href='#verdicts'>Verdicts</a><a href='#compare'>Compare</a><a href='#agents'>For Agents</a><a href='#users'>For Users</a></div><a class='btn' href='#check'>Check now</a></div></div>
+<div class='wrap'>
 <div class='hero'>
-<div><div style='font-size:11px;letter-spacing:1px;color:#888'>SOLANA TOKEN CHECK - REAL NUMBERS, NO HYPE</div><h1>Check a token<br>before you buy.</h1><p class='sub'>Paste a Solana mint. Get a clear verdict - <b>PASS / HOLD-BUY / SELL</b> - plus real price, liquidity, volume and risk in seconds. No hype. No guess.</p><div class='pills'><span class='pill'>English only</span><span class='pill'>Agent-ready JSON</span></div>
-<div class='card'><h3>Check a token</h3><form action='/pro' method='get' class='row'><input name='mint' placeholder='Enter a Solana mint address...'><button>CHECK</button></form><p class='ex'>Example: Fartcoin - try a token you know.</p><div class='try'><a href='/pro'>Try PRO</a><a href='/pro_status'>Pro Status</a><a href='/health'>Health</a></div></div>
+<div><div class='eyebrow'>SOLANA TOKEN CHECK - REAL NUMBERS, NO HYPE</div><h1>Check a token<br>before <i>you buy.</i></h1><p class='sub'>Paste a Solana mint. Get a clear verdict - <b>PASS / HOLD-BUY / SELL</b> - plus real price, liquidity, volume, holder, LP and dev risk in seconds. No hype. No guess. Free, no signup.</p><div class='pills'><span class='pill'>English only</span><span class='pill'>Agent-ready JSON</span><span class='pill'>Live on-chain data</span></div>
+<div class='card' id='check' style='margin-top:14px'><h3>Check a token</h3><form action='/pro' method='get' class='row'><input id='mint' name='mint' placeholder='Enter a Solana mint address...'><button class='check'>CHECK</button></form><p class='ex'>Example: paste a mint from DexScreener, Phantom or your wallet. Try one you know.</p><div class='try'><a href="javascript:fill('98vd3CovpBmHJGN2z9rSiZRxM8QBvcc9Gnvq1RdJnpump')">Try example mint</a><a href='/pro'>PRO</a><a href='/pro_status'>Pro Status</a><a href='/health'>Health</a><a href='#agents'>Agent JSON</a></div></div>
+<div class='stats'><div class='stat'><b>Live</b><span>Real price + liquidity</span></div><div class='stat'><b>6 checks</b><span>Market / Holder / LP / Dev</span></div><div class='stat'><b>No key</b><span>No signup needed</span></div><div class='stat'><b>Agent</b><span>JSON in 1 call</span></div></div>
 </div>
-<div><div class='blobbox'><div class='pile'>
-<div class='pile-blob' style='left:8%;top:8%;width:64px;height:64px;background:#FF9AA2'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
-<div class='pile-blob' style='left:28%;top:2%;width:58px;height:58px;background:#FFD6A5'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
-<div class='pile-blob' style='left:48%;top:10%;width:70px;height:70px;background:#FDFFB6'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
-<div class='pile-blob' style='left:68%;top:4%;width:52px;height:52px;background:#CAFFBF'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
-<div class='pile-blob' style='left:82%;top:18%;width:60px;height:60px;background:#9BF6FF'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
-<div class='pile-blob' style='left:14%;top:42%;width:56px;height:56px;background:#BDB2FF'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
-<div class='pile-blob' style='left:36%;top:44%;width:62px;height:62px;background:#FFC6FF'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
-<div class='pile-blob' style='left:58%;top:46%;width:54px;height:54px;background:#FFAFCC'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
-<div class='pile-blob' style='left:74%;top:50%;width:66px;height:66px;background:#A0C4FF'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
-<div class='pile-blob' style='left:22%;top:70%;width:50px;height:50px;background:#B5E48C'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
-<div class='pile-blob' style='left:46%;top:72%;width:58px;height:58px;background:#FFD166'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
-<div class='pile-blob' style='left:66%;top:74%;width:52px;height:52px;background:#FF8FA3'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div>
-</div><div class='verdict'>PASS - HOLD-BUY - SELL</div></div></div>
+<div><div class='blobbox'><div class='pile'><svg viewBox='0 0 340 268' width='100%' height='268' style='display:block'>
+<g transform='translate(10,10)'><path d='M30 50 Q10 50 10 30 Q10 10 30 10 Q40 0 60 5 Q80 0 85 15 Q105 20 100 40 Q110 60 85 60 L30 60 Z' fill='#1BA99A'/><ellipse cx='45' cy='38' rx='7' ry='10' fill='white'/><ellipse cx='70' cy='38' rx='7' ry='10' fill='white'/></g>
+<g transform='translate(115,5)'><polygon points='35,0 70,15 70,55 35,70 0,55 0,15' fill='#FF9F2E'/><ellipse cx='28' cy='35' rx='7' ry='10' fill='white'/><ellipse cx='48' cy='35' rx='7' ry='10' fill='white'/></g>
+<g transform='translate(200,0)'><path d='M35 0 Q60 35 60 60 Q60 85 35 85 Q10 85 10 60 Q10 35 35 0 Z' fill='#8B5CF6'/><ellipse cx='28' cy='55' rx='7' ry='10' fill='white'/><ellipse cx='48' cy='55' rx='7' ry='10' fill='white'/></g>
+<g transform='translate(275,55)'><circle cx='25' cy='10' r='18' fill='#FF5A5A'/><circle cx='50' cy='25' r='18' fill='#FF5A5A'/><circle cx='45' cy='55' r='18' fill='#FF5A5A'/><circle cx='15' cy='55' r='18' fill='#FF5A5A'/><circle cx='30' cy='35' r='22' fill='#FF5A5A'/><ellipse cx='25' cy='35' rx='6' ry='9' fill='white'/><ellipse cx='42' cy='35' rx='6' ry='9' fill='white'/></g>
+<g transform='translate(15,90)'><circle cx='35' cy='40' r='38' fill='#3B82F6'/><ellipse cx='28' cy='38' rx='7' ry='10' fill='white'/><ellipse cx='48' cy='38' rx='7' ry='10' fill='white'/></g>
+<g transform='translate(105,85)'><path d='M20 60 Q0 60 0 40 Q0 20 20 20 Q30 5 50 10 Q70 5 75 20 Q95 25 90 45 Q95 65 70 65 L20 65 Z' fill='#4CAF50'/><ellipse cx='40' cy='42' rx='7' ry='10' fill='white'/><ellipse cx='62' cy='42' rx='7' ry='10' fill='white'/></g>
+<g transform='translate(205,95)'><polygon points='35,0 70,75 0,75' fill='#FF7A1A'/><ellipse cx='28' cy='50' rx='7' ry='10' fill='white'/><ellipse cx='48' cy='50' rx='7' ry='10' fill='white'/></g>
+<g transform='translate(275,130)'><circle cx='35' cy='35' r='36' fill='#2BBED6'/><ellipse cx='28' cy='34' rx='7' ry='10' fill='white'/><ellipse cx='48' cy='34' rx='7' ry='10' fill='white'/></g>
+<g transform='translate(35,165)'><polygon points='35,0 70,75 0,75' fill='#FF7AA2'/><ellipse cx='28' cy='50' rx='7' ry='10' fill='white'/><ellipse cx='48' cy='50' rx='7' ry='10' fill='white'/></g>
+<g transform='translate(125,165)'><path d='M0 70 Q0 10 40 5 Q80 10 80 70 L0 70 Z' fill='#7A4A2A'/><ellipse cx='30' cy='45' rx='7' ry='10' fill='white'/><ellipse cx='52' cy='45' rx='7' ry='10' fill='white'/></g>
+<g transform='translate(10,215)'><rect x='0' y='0' width='60' height='45' rx='22' fill='#B18CFF'/><ellipse cx='22' cy='24' rx='6' ry='9' fill='white'/><ellipse cx='40' cy='24' rx='6' ry='9' fill='white'/></g>
+<g transform='translate(205,210)'><path d='M0 45 Q0 5 35 0 Q70 5 70 45 Q70 60 35 60 Q0 60 0 45 Z' fill='#FFD93B'/><ellipse cx='28' cy='32' rx='7' ry='10' fill='white'/><ellipse cx='48' cy='32' rx='7' ry='10' fill='white'/></g>
+</svg></div><div class='verdict'>PASS - HOLD-BUY - SELL</div><div class='mini-live'><b>What you get in 1 check</b><p>Grade A-F + 5 breakdowns: Market / Holder / LP / Dev / Authority. Plus flags: low liquidity, top holder, unlocked LP, mint still on, dev selling.</p></div></div></div>
 </div>
-<div class='three' id='what'><div class='mini'><b>Liquidity - can you sell?</b><p>We check how much money is actually in the pool, not just price. Low liquidity = you may not be able to sell.</p></div><div class='mini'><b>On-chain - who controls it?</b><p>Mint / freeze authorities, holder concentration, dev wallet. If one wallet controls it, it is risky.</p></div><div class='mini'><b>Price + Activity - is it pumping?</b><p>24h change, volume vs liquidity, and age. New + pumping + low liquidity = danger.</p></div></div>
-<div class='how' id='how'><h3 style='margin:0'>How it works - 3 steps</h3><div class='how-grid'><div class='mini'><b>1. Paste mint</b><p>Copy the mint from DexScreener or your wallet.</p></div><div class='mini'><b>2. We check live data</b><p>Market data + on-chain authorities. No opinions, just numbers.</p></div><div class='mini'><b>3. Get your verdict</b><p>PASS = good setup. HOLD-BUY = mixed, small size. SELL = do not buy.</p></div></div></div>
-<div class='agents' id='agents'><h3 style='margin:0 0 8px'>For Agents</h3><p style='font-size:13px;color:#666;margin:0 0 8px'>Use the JSON endpoint. No signup, no key needed.</p><div class='code'>GET /check?mint=...  /pro_json?mint=...
-{
+
+<div class='sec' id='what'><h2>What PRO checks</h2><p class='lead'>Not just price. We check if you can sell, who controls it, and if the dev can rug.</p><div class='grid3'>
+<div class='mini'><span class='tag'>MARKET</span><br><b>Liquidity - can you sell?</b><p>How much money is actually in the pool. Low liquidity = price looks good but you cannot sell. We show real USD liquidity, volume, 24h change.</p></div>
+<div class='mini'><span class='tag'>HOLDER</span><br><b>Holder & Top holder</b><p>Who holds most? Top 1% + Top 10% + concentration. If one wallet holds too much, bundle risk. Dev holds shown separately.</p></div>
+<div class='mini'><span class='tag'>LP</span><br><b>LP Lock</b><p>Is liquidity locked / burned? Unlocked LP = dev can pull. Locked LP + burned LP = safer. We show LP status clearly.</p></div>
+<div class='mini'><span class='tag'>DEV</span><br><b>Dev & Authority</b><p>Creator, dev holds, dev history. Mint / freeze authority still on or revoked? If mint is still on, supply can inflate. If freeze is on, wallets can be frozen.</p></div>
+<div class='mini'><span class='tag'>PRICE</span><br><b>Price + Activity</b><p>24h change, volume vs liquidity, age. New + pumping + low liquidity = danger. Old + stable + deep liquidity = calmer.</p></div>
+<div class='mini'><span class='tag'>GRADE</span><br><b>Grade A-F</b><p>One grade + 5 breakdowns: Market / Holder / LP / Dev / Authority. No hidden thresholds. You see why it got that grade.</p></div>
+</div></div>
+
+<div class='sec' id='verdicts'><h2>How to read the verdict</h2><p class='lead'>PASS does not mean safe. Always check yourself. Use size to match risk.</p><div class='verdicts'>
+<div class='mini v-pass'><b>PASS - Good setup</b><p>Deep liquidity, distributed holders, LP locked / burned, mint / freeze revoked or clean, dev not controlling too much.</p><p><b>What to do:</b> Still do your own research. Check chart, community, and use a size you are okay losing.</p></div>
+<div class='mini v-hold'><b>HOLD-BUY - Mixed</b><p>Some good, some risky. Example: good liquidity but top holder high, or LP locked but dev still holds a lot.</p><p><b>What to do:</b> Small size only. Wait for better setup, or split entry. Do not go all-in.</p></div>
+<div class='mini v-sell'><b>SELL - Do not buy</b><p>High risk: very low liquidity, one wallet controls most, unlocked LP, mint still on, or fresh pump with no depth.</p><p><b>What to do:</b> Do not buy. If you already hold, consider exiting. This is a warning, not financial advice.</p></div>
+</div></div>
+
+<div class='sec' id='compare'><h2>Compare & Batch - For fast decisions</h2><p class='lead'>Do not check one by one. Compare 2 tokens side by side, or batch 5 at once.</p><div class='grid2'>
+<div class='compare-box'><h3 style='margin:0 0 8px'>Compare 2 tokens</h3><p style='font-size:13px'>Which one is safer? Paste 2 mints.</p><form action='/compare' method='get' class='row' style='flex-direction:column'><input name='mint1' placeholder='Mint 1'><input name='mint2' placeholder='Mint 2'><button class='check' style='background:#FFD93B;color:#111'>COMPARE</button></form></div>
+<div class='card'><h3>Batch 5 tokens</h3><p style='font-size:13px;color:#666;margin:0 0 10px'>Paste up to 5 mints, comma separated. Get 5 grades in one go.</p><form action='/batch' method='get' class='row' style='flex-direction:column'><input name='mints' placeholder='mint1,mint2,mint3,mint4,mint5'><button class='check'>BATCH CHECK</button></form><p style='font-size:12px;color:#888;margin:8px 0 0'>Tip: copy mints from DexScreener trending list and paste here.</p></div>
+</div></div>
+
+<div class='sec' id='agents'><h2>For Agents - 1 call, full JSON</h2><p class='lead'>No signup, no key, no login. Your agent calls one URL and gets everything. Copy and paste.</p>
+<div class='card'><h3>API Endpoints</h3><table><tr><th>Endpoint</th><th>What it returns</th><th>Use when</th></tr>
+<tr><td><code>GET /check?mint=...</code></td><td>Quick verdict + price + liquidity</td><td>Fast filter in bot</td></tr>
+<tr><td><code>GET /pro?mint=...</code></td><td>Full page: Grade + Holder / LP / Dev</td><td>Human clicks link</td></tr>
+<tr><td><code>GET /pro_json?mint=...</code></td><td>Full JSON: Grade + breakdowns + flags</td><td>Agent needs all data</td></tr>
+<tr><td><code>GET /compare?mint1=&mint2=</code></td><td>Side-by-side 2 tokens</td><td>Choose between 2</td></tr>
+<tr><td><code>GET /batch?mints=a,b,c</code></td><td>Up to 5 tokens at once</td><td>Scan a list</td></tr>
+<tr><td><code>GET /pro_status</code></td><td>Service health + PRO status</td><td>Check if API is up</td></tr>
+<tr><td><code>GET /health</code></td><td>Health check</td><td>Uptime / cron</td></tr>
+</table></div>
+<div class='grid2' style='margin-top:12px'><div class='card'><h3>Example - cURL</h3><div class='code' id='curl'>curl "https://signal-api-24q4.onrender.com/pro_json?mint=98vd3CovpBmHJGN2z9rSiZRxM8QBvcc9Gnvq1RdJnpump"</div><button class='btn' onclick="copyTxt('curl')">Copy cURL</button></div>
+<div class='card'><h3>Example - Response</h3><div class='code' id='resp'>{
   "verdict": "avoid",
+  "grade": "D",
   "symbol": "FART",
   "price": 0.00012,
   "liquidity_usd": 12345,
   "top_holder": "12%",
-  "flags": ["low_liquidity", "new_pair"]
-}</div><p style='font-size:12px;color:#888'>PASS does not mean safe. Always check yourself.</p></div>
-<div class='foot'><span>2026 TVibe - Check a token before you buy.</span><span>Data is real. Not financial advice.</span></div>
+  "flags": ["low_liquidity", "new_pair"],
+  "breakdown": {
+    "market": 40,
+    "holder": 30,
+    "lp": 20,
+    "dev": 50,
+    "authority": 60
+  }
+}</div><button class='btn' onclick="copyTxt('resp')">Copy JSON</button></div></div>
+<div class='card' style='margin-top:12px'><h3>Agent prompt - paste to your agent</h3><div class='code' id='prompt'>Before you buy any Solana token, call:
+GET https://signal-api-24q4.onrender.com/pro_json?mint={MINT}
+If verdict is SELL / avoid, do NOT buy.
+If verdict is HOLD-BUY, use small size only.
+If verdict is PASS, still check chart + liquidity yourself.
+PASS does not mean safe.</div><button class='btn' onclick="copyTxt('prompt')">Copy Agent Prompt</button></div>
+</div>
+
+<div class='sec' id='users'><h2>For Users - 3 steps</h2><div class='grid3'><div class='mini'><b>1. Paste mint</b><p>Copy mint from DexScreener or Phantom. Paste above. No wallet connect needed.</p></div><div class='mini'><b>2. We check live data</b><p>Market + on-chain in seconds. No opinions, just numbers.</p></div><div class='mini'><b>3. Get your verdict</b><p>PASS / HOLD-BUY / SELL + Grade + why. Decide yourself.</p></div></div>
+<div class='faq' style='margin-top:16px'><h3>FAQ</h3>
+<details open><summary>Is PASS safe?</summary><p>No. PASS means good setup on the checks we run. It does not mean price will go up. Crypto is volatile. Always use size you can afford to lose.</p></details>
+<details><summary>What if liquidity is low?</summary><p>You may not be able to sell at the price you see. Slippage will be high. Treat low liquidity as high risk, even if price is pumping.</p></details>
+<details><summary>What is LP Lock?</summary><p>LP = liquidity pool. If LP is locked or burned, dev cannot pull liquidity. If LP is unlocked, dev can pull and price can crash to zero.</p></details>
+<details><summary>Do I need to connect wallet?</summary><p>No. Never connect wallet to check a token. Just paste mint. We never ask for seed phrase.</p></details>
+</div></div>
+
+<div class='foot'><span>2026 TVibe - Check a token before you buy.</span><span>Data is real. Not financial advice. PASS does not mean safe.</span></div>
+</div>
 <div class='track'>
 <div class='runner' style='animation-delay:-0s'><div class='rblob' style='background:#FF9AA2'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
 <div class='runner' style='animation-delay:-2.2s'><div class='rblob' style='background:#FFD6A5'><div class='eyes'><div class='eye'></div><div class='eye'></div></div><div class='mouth'></div></div></div>
@@ -390,6 +453,7 @@ button{background:#111;color:#fff;border:0;padding:12px 16px;border-radius:12px;
 </div>
 </body></html>
 """)
+
 
     # 1) Middleware - intercepts / BEFORE any other middleware / fallback
     try:
@@ -553,3 +617,48 @@ try:
     print("[fix-check-v2] robust /pro + /pro_debug installed")
 except Exception as _e:
     print(f"[fix-check-v2] FAILED: {_e}")
+
+# --- FIX FINAL: Move / and /pro to front (catch-all in core shadows them) ---
+try:
+    _routes = list(getattr(app.router, "routes", []) or [])
+    def _move_to_front(path):
+        try:
+            _idx = [i for i, r in enumerate(_routes) if getattr(r, "path", "") == path]
+            if not _idx:
+                return False
+            # Take last matching route (our robust one) and move to front
+            _r = _routes.pop(_idx[-1])
+            _routes.insert(0, _r)
+            return True
+        except Exception as e:
+            print(f"[fix-final] move {path} failed: {e}")
+            return False
+    _m1 = _move_to_front("/pro")
+    _m2 = _move_to_front("/")
+    # Apply back to both router and app if they are different lists
+    try:
+        app.router.routes = _routes
+    except Exception:
+        pass
+    try:
+        if getattr(app, "routes", None) is not app.router.routes:
+            app.routes = _routes
+    except Exception:
+        pass
+    print(f"[fix-final] /pro to front={_m1} / to front={_m2} total={len(_routes)}")
+    # Also ensure /pro_debug is at front too
+    try:
+        _routes2 = list(getattr(app.router, "routes", []) or [])
+        _idxd = [i for i, r in enumerate(_routes2) if getattr(r, "path", "") == "/pro_debug"]
+        if _idxd:
+            _rd = _routes2.pop(_idxd[-1]); _routes2.insert(0, _rd)
+            app.router.routes = _routes2
+            try:
+                app.routes = _routes2
+            except Exception:
+                pass
+            print("[fix-final] /pro_debug to front=True")
+    except Exception:
+        pass
+except Exception as _e:
+    print(f"[fix-final] FAILED: {_e}")
