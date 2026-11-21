@@ -499,3 +499,40 @@ try:
         print("[clean-fix] / moved to front, /pro kept as original")
 except Exception as _e:
     print(f"[clean-fix] FAILED: {_e}")
+
+# --- FIX NOT FOUND: /pro was shadowed by core catch-all (core_final has /{mint} /{path}) ---
+# Previous clean-fix only moved / to front, so /pro still behind catch-all -> "Not Found" white page.
+# This fix does NOT delete /pro. It adds /check alias and moves OUR routes to front.
+try:
+    from fastapi.responses import RedirectResponse as _RR_NF
+    from fastapi import Query as _Q_NF
+    _paths_nf = [getattr(r, "path", "") for r in (getattr(app, "routes", []) or [])]
+    if "/check" not in _paths_nf:
+        @app.get("/check")
+        def _check_alias_nf(mint: str = _Q_NF(default="")):
+            return _RR_NF(url=f"/pro?mint={(mint or '').strip()}", status_code=302)
+        print("[fix-notfound] /check alias added -> /pro")
+    # Move our routes to front so core catch-all cannot shadow them
+    _routes_nf = list(getattr(app.router, "routes", []) or [])
+    # Desired front order: /pro, /pro_json, /pro_status, /compare, /batch, /omni_pro, /check, /
+    _want = ["/pro", "/pro_json", "/pro_status", "/compare", "/batch", "/omni_pro", "/check", "/"]
+    # Move in reverse so final order is _want
+    for _p in reversed(_want):
+        _idxs = [i for i, r in enumerate(_routes_nf) if getattr(r, "path", "") == _p]
+        if _idxs:
+            _r = _routes_nf.pop(_idxs[-1])
+            _routes_nf.insert(0, _r)
+            print(f"[fix-notfound] moved {_p} to front")
+    try:
+        app.router.routes = _routes_nf
+    except Exception:
+        pass
+    try:
+        if getattr(app, "routes", None) is not app.router.routes:
+            app.routes = _routes_nf
+    except Exception:
+        pass
+    _after = [getattr(r, "path", "") for r in _routes_nf[:12]]
+    print(f"[fix-notfound] front routes now: {_after}")
+except Exception as _e:
+    print(f"[fix-notfound] FAILED: {_e}")
