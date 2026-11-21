@@ -313,36 +313,51 @@ globals()["app"] = app
 _ver = g.get("VERSION") or getattr(app, "version", "?")
 print(f"[loader] ready entry=app:app version={_ver} routes~={len(getattr(app, 'routes', []) or [])}")
 
-# --- FIX: / was 404 (patch_live_fix v34-mini replaced / with FALLBACK) ---
-# Remove broken / route and restore a working home that always returns 200.
+# --- FIX2: / 404 - patch_live_fix blocks / at middleware level, not in routes ---
+# Previous fix removed 0 routes, so / is not in router. Force it via middleware (runs before routing) + insert route at 0.
 try:
-    _routes = getattr(app, "routes", []) or []
-    _before = len(_routes)
-    # FastAPI: app.routes == app.router.routes, removing from router is enough
+    from fastapi.responses import HTMLResponse as _HTMLResponse2
+    _HOME_HTML2 = ("<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<title>TVibe Signal</title>"
+        "<style>body{background:#FFF6C9;font-family:system-ui;padding:20px;color:#222}input{padding:10px;width:78%;border-radius:10px;border:1px solid #ddd}a,button{background:#111;color:#fff;padding:10px 14px;border-radius:10px;text-decoration:none;border:0}.card{background:#fff;border-radius:16px;padding:16px;margin:14px 0}</style></head>"
+        "<body><h1>TVibe Signal</h1><p>Check a Solana token before you buy. PASS does not mean safe.</p>"
+        "<div class='card'><h3>Check token</h3><form action='/pro' method='get'><input name='mint' placeholder='Paste Solana mint'><button>Check PRO</button></form>"
+        "<p style='font-size:13px'>Paste mint, then see Grade + Holder / LP / Dev.</p></div>"
+        "<div class='card'><h3>Quick links</h3><p><a href='/pro_status'>Pro Status</a> &nbsp; <a href='/health'>Health</a> &nbsp; <a href='/play'>Playground</a> &nbsp; <a href='/pro'>PRO</a></p>"
+        "<p style='font-size:13px'>Agent JSON: /pro_json?mint=... &nbsp; Compare: /compare?mint1=...&mint2=...</p></div>"
+        "<p style='font-size:12px;color:#7A6A55'>PASS does not mean safe. Always check yourself.</p></body></html>")
+    # 1) Middleware - intercepts / BEFORE any other middleware / fallback
     try:
-        app.router.routes = [r for r in app.router.routes if getattr(r, "path", "") != "/"]
-    except Exception:
-        pass
-    # If app.routes is a separate list, clean it too
+        @app.middleware("http")
+        async def _fix_root_mw(request, call_next):
+            try:
+                p = getattr(getattr(request, "url", None), "path", "") or ""
+            except Exception:
+                p = ""
+            if p == "/" or p == "":
+                return _HTMLResponse2(_HOME_HTML2)
+            return await call_next(request)
+        print("[fix2] middleware for / installed")
+    except Exception as _e2:
+        print(f"[fix2] middleware NOT installed: {_e2}")
+    # 2) Also insert a real route at position 0 for safety (in case middleware is bypassed)
     try:
-        if getattr(app, "routes", None) is not app.router.routes:
-            app.routes = [r for r in app.routes if getattr(r, "path", "") != "/"]
-    except Exception:
-        pass
-    from fastapi.responses import HTMLResponse as _HTMLResponse
-    @app.get("/")
-    def _home_fix():
-        return _HTMLResponse(
-            "<!DOCTYPE html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-            "<title>TVibe Signal</title>"
-            "<style>body{background:#FFF6C9;font-family:system-ui;padding:20px;color:#222}input{padding:10px;width:78%;border-radius:10px;border:1px solid #ddd}a,button{background:#111;color:#fff;padding:10px 14px;border-radius:10px;text-decoration:none;border:0}.card{background:#fff;border-radius:16px;padding:16px;margin:14px 0}</style></head>"
-            "<body><h1>TVibe Signal</h1><p>Check a Solana token before you buy. PASS does not mean safe.</p>"
-            "<div class='card'><h3>Check token</h3><form action='/pro' method='get'><input name='mint' placeholder='Paste Solana mint'><button>Check PRO</button></form>"
-            "<p style='font-size:13px'>Example: paste mint, then see Grade + Holder / LP / Dev.</p></div>"
-            "<div class='card'><h3>Quick links</h3><p><a href='/pro_status'>Pro Status</a> &nbsp; <a href='/health'>Health</a> &nbsp; <a href='/play'>Playground</a> &nbsp; <a href='/pro'>PRO</a></p>"
-            "<p style='font-size:13px'>Agent JSON: /pro_json?mint=... &nbsp; Compare: /compare?mint1=...&mint2=...</p></div>"
-            "<p style='font-size:12px;color:#7A6A55'>PASS does not mean safe. Always check yourself.</p></body></html>"
-        )
-    print(f"[fix] / restored 200 (removed {_before - len(getattr(app,'routes',[]) or [])} broken / route(s))")
+        from fastapi.routing import APIRoute as _APIRoute
+        async def _home_fix2():
+            return _HTMLResponse2(_HOME_HTML2)
+        _r = _APIRoute(path="/", endpoint=_home_fix2, methods=["GET", "HEAD"])
+        try:
+            app.router.routes.insert(0, _r)
+        except Exception:
+            pass
+        try:
+            # app.routes may be a different list object in this codebase, insert there too
+            if getattr(app, "routes", None) is not app.router.routes:
+                app.routes.insert(0, _r)
+        except Exception:
+            pass
+        print(f"[fix2] / route inserted at 0, total routes now {len(getattr(app,'routes',[]) or [])}")
+    except Exception as _e3:
+        print(f"[fix2] route insert failed: {_e3}")
 except Exception as _e:
-    print(f"[fix] / NOT restored: {_e}")
+    print(f"[fix2] FAILED: {_e}")
