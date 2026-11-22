@@ -775,3 +775,64 @@ except Exception as _eGC:
     print(f"[store_check] guarantee FAILED: {_eGC}")
 
 print("[rescue-v44] done")
+
+# --- STORE_CHECK via middleware (bypass router shadowing) ---
+# Root cause: /store_check IS in router.routes (front list shows it) but a
+# catch-all / earlier route still matches it first -> 404.
+# Middleware runs BEFORE routing, so it cannot be shadowed.
+try:
+    from fastapi.responses import JSONResponse as _JRSM
+    @app.middleware("http")
+    async def _store_check_mw(request, call_next):
+        try:
+            _p = getattr(getattr(request, "url", None), "path", "") or ""
+        except Exception:
+            _p = ""
+        if _p == "/store_check" or _p == "/store_check/":
+            try:
+                import os as _osSM
+                url = (_osSM.getenv("UPSTASH_REDIS_REST_URL") or _osSM.getenv("REDIS_URL") or "").strip()
+                tok = (_osSM.getenv("UPSTASH_REDIS_REST_TOKEN") or _osSM.getenv("REDIS_TOKEN") or "").strip()
+                try:
+                    if not url and isinstance(g, dict):
+                        url = (g.get("UPSTASH_REDIS_REST_URL") or g.get("REDIS_URL") or "").strip()
+                    if not tok and isinstance(g, dict):
+                        tok = (g.get("UPSTASH_REDIS_REST_TOKEN") or g.get("REDIS_TOKEN") or "").strip()
+                except Exception:
+                    pass
+                out = {"UPSTASH_REDIS_REST_URL_set": bool(url), "UPSTASH_REDIS_REST_TOKEN_set": bool(tok)}
+                if not (url and tok):
+                    out["verdict"] = "missing env var(s) on Render"
+                    return _JRSM(out)
+                from urllib.parse import urlparse as _upSM
+                pu = _upSM(url)
+                host = pu.netloc
+                out.update({"url_scheme": pu.scheme, "url_host": (host[:5] + "..." + host[-14:]) if len(host) > 22 else host,
+                            "token_length": len(tok), "token_has_whitespace": tok != tok.strip() or " " in tok})
+                if pu.scheme != "https":
+                    out["verdict"] = "URL must be the REST url (https://xxxx.upstash.io), not a redis:// / rediss:// address"
+                    return _JRSM(out)
+                try:
+                    import requests as _rqSM
+                    _rr = _rqSM.post(url.rstrip("/") + "/pipeline", json=[["PING"]], headers={"Authorization": "Bearer " + tok}, timeout=6.0)
+                    out["http_status"] = _rr.status_code
+                    out["body"] = (_rr.text or "")[:160]
+                    if _rr.status_code == 200 and "PONG" in (_rr.text or ""):
+                        out["verdict"] = "OK - store answers PING (health shows it again within 5 minutes)"
+                    elif _rr.status_code in (401, 403):
+                        out["verdict"] = "token rejected - copy the REST token again from the Upstash database page"
+                    elif _rr.status_code == 404:
+                        out["verdict"] = "URL not found - database deleted/paused or URL wrong"
+                    else:
+                        out["verdict"] = "unexpected answer - see body"
+                except Exception as e:
+                    out["error"] = type(e).__name__
+                    out["detail"] = str(e)[:140]
+                    out["verdict"] = "cannot reach Upstash from Render (DNS / timeout / wrong host)"
+                return _JRSM(out)
+            except Exception as e:
+                return _JRSM({"error": type(e).__name__, "detail": str(e)[:140]}, status_code=500)
+        return await call_next(request)
+    print("[store_check] middleware installed (bypass router)")
+except Exception as _eSM:
+    print(f"[store_check] middleware FAILED: {_eSM}")
