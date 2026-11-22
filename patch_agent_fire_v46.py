@@ -21,6 +21,15 @@ import json
 import os
 import time
 from typing import Any, Dict, List, Optional
+import asyncio
+import inspect
+
+try:  # module-level on purpose: with `from __future__ import annotations` FastAPI resolves
+    # 'Request' / 'Query' from THIS module's globals; a local import inside apply() is not enough
+    from fastapi import Query, Request
+    from fastapi.responses import JSONResponse, PlainTextResponse, HTMLResponse
+except Exception:  # apply() reports the problem and skips
+    Query = Request = JSONResponse = PlainTextResponse = HTMLResponse = None
 
 
 VERSION = "3.0.28-fire"
@@ -454,39 +463,55 @@ Public free instance — self-host for high volume. GET /ops/fair-use if present
         request: Request,
         mints: str = Query(..., description="Comma-separated mints, max 5"),
     ):
-        parts = [p.strip() for p in (mints or "").split(",") if p.strip()][:5]
+        parts = list(dict.fromkeys(p.strip() for p in (mints or "").split(",") if p.strip()))[:5]
         if not parts:
             return JSONResponse({"error": "need mints"}, status_code=400)
+        bad = [p[:50] for p in parts if MINT_RE is not None and not MINT_RE.match(p)]
+        if bad:
+            return JSONResponse({"error": "invalid_mint", "invalid": bad}, status_code=400)
         if callable(rate_limited) and callable(client_ip):
             try:
                 wait = rate_limited(client_ip(request), cost=min(4 * len(parts), 12))
-                if wait and callable(too_many):
-                    raise too_many(wait)
             except Exception:
-                pass
+                wait = 0
+            if wait:
+                try:
+                    w = max(1, int(wait))
+                except (TypeError, ValueError):
+                    w = 30
+                return JSONResponse({"error": "rate_limited", "retry_after_s": w}, status_code=429,
+                                    headers={"Retry-After": str(w)})
 
         client = getattr(request.app.state, "client", None)
-        results = []
-        for m in parts:
+        sem = asyncio.Semaphore(3)
+
+        async def _one(m: str) -> dict:
             item = {"mint": m}
             try:
                 if callable(build_omni) and client is not None:
-                    pkt = await build_omni(client, m)
+                    async with sem:
+                        pkt = await asyncio.wait_for(build_omni(client, m), timeout=25)
                     if isinstance(pkt, dict):
                         item.update(_agent_view(pkt))
                     else:
                         item["action"] = "review"
                         item["error"] = "bad_payload"
                 else:
-                    # fallback: internal pro path not required
                     item["action"] = "review"
                     item["error"] = "build_omni_unavailable"
                     item["nfa"] = True
-            except Exception as e:
+            except asyncio.TimeoutError:
                 item["action"] = "review"
-                item["error"] = str(e)[:120]
+                item["error"] = "timeout"
                 item["nfa"] = True
-            results.append(item)
+            except Exception as e:
+                print("[fire-v46] batch item failed:", type(e).__name__)
+                item["action"] = "review"
+                item["error"] = "upstream_error"
+                item["nfa"] = True
+            return item
+
+        results = list(await asyncio.gather(*[_one(m) for m in parts]))
 
         return {
             "count": len(results),
