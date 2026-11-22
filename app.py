@@ -1,6 +1,7 @@
 """app.py — TVibe Signal entrypoint for Render (uvicorn app:app).
+Built from new 147KB app.py + pro-engine.py (hyphen-safe loader).
 
-Clean Merged File 1+2 (filtered): Loader + PRO V43 Premium only. Kept = core/features/extensions + patch_live_fix + PRO. Filtered = patch_stats_fix, patch_p0, /holders, /check_pro, /grade (dup of /pro_json). Loader + PRO V43 Premium inline. Upload ONLY this file as app.py. Loads the full stack into one shared namespace:
+Clean Merged File 1+2 (filtered): Loader + PRO V43 Premium only. Kept = core/features/extensions + patch_live_fix + PRO. Filtered = patch_stats_fix, patch_p0, /holders, /check_pro, /grade (dup of /pro_json). Loader + PRO V43 Premium inline. Upload this file as app.py + pro-engine.py (or pro_engine.py) next to it. Loads the full stack into one shared namespace:
   core_final → features → extensions → optional patches
 
 Do NOT use the old standalone "cute" app body here — that removed /omni and track-record.
@@ -86,7 +87,28 @@ def _apply_pro_v43_inline(g):
         paths = []
     if "/pro_status" in paths:
         print("[pro_v43] already applied"); return
-    import pro_engine as _pe
+    # --- PRO ENGINE loader: supports BOTH pro_engine.py and pro-engine.py ---
+    # pro-engine.py has a hyphen, so `import pro_engine` fails on Render.
+    # Try normal import first, then load by file path.
+    import importlib.util as _ilu
+    def _load_pro_engine():
+        try:
+            import pro_engine as _m
+            print("[pro_engine] loaded via import pro_engine")
+            return _m
+        except ImportError:
+            pass
+        for _fname in ("pro_engine.py", "pro-engine.py"):
+            _p = os.path.join(ROOT, _fname)
+            if os.path.isfile(_p):
+                _spec = _ilu.spec_from_file_location("pro_engine", _p)
+                _m2 = _ilu.module_from_spec(_spec)
+                sys.modules["pro_engine"] = _m2
+                _spec.loader.exec_module(_m2)
+                print(f"[pro_engine] loaded from {_fname}")
+                return _m2
+        raise ImportError("pro_engine NOT FOUND: upload pro-engine.py (or pro_engine.py) next to app.py")
+    _pe = _load_pro_engine()
 
     def _core_rpc():
         # keep compatibility with RPC urls that the core layer already resolved
@@ -129,8 +151,22 @@ def _apply_pro_v43_inline(g):
         if not ok:
             return JSONResponse({"error": "rate_limited", "retry_after_s": retry}, status_code=429,
                                 headers={"Retry-After": str(retry)})
-        url = ((g.get("REDIS_URL") if isinstance(g, dict) else "") or "").strip()
-        tok = ((g.get("REDIS_TOKEN") if isinstance(g, dict) else "") or "").strip()
+        # FIX store_check: core_final does NOT always put REDIS_URL in g.
+        # Fallback to real Render env names: UPSTASH_REDIS_REST_URL / TOKEN.
+        def _env_or_g(*names):
+            for _n in names:
+                try:
+                    _v = (g.get(_n) if isinstance(g, dict) else "") or ""
+                except Exception:
+                    _v = ""
+                if isinstance(_v, str) and _v.strip():
+                    return _v.strip()
+                _e = (os.getenv(_n) or "").strip()
+                if _e:
+                    return _e
+            return ""
+        url = _env_or_g("UPSTASH_REDIS_REST_URL", "REDIS_URL", "UPSTASH_URL")
+        tok = _env_or_g("UPSTASH_REDIS_REST_TOKEN", "REDIS_TOKEN", "UPSTASH_TOKEN")
         out = {"UPSTASH_REDIS_REST_URL_set": bool(url), "UPSTASH_REDIS_REST_TOKEN_set": bool(tok)}
         if not (url and tok):
             out["verdict"] = "missing env var(s) on Render"
@@ -148,9 +184,16 @@ def _apply_pro_v43_inline(g):
             if client is not None:
                 r = await client.post(url.rstrip("/") + "/pipeline", json=[["PING"]], headers=hdr, timeout=6.0)
             else:
-                import httpx as _hx
-                async with _hx.AsyncClient() as _c:
-                    r = await _c.post(url.rstrip("/") + "/pipeline", json=[["PING"]], headers=hdr, timeout=6.0)
+                try:
+                    import httpx as _hx
+                    async with _hx.AsyncClient() as _c:
+                        r = await _c.post(url.rstrip("/") + "/pipeline", json=[["PING"]], headers=hdr, timeout=6.0)
+                except ImportError:
+                    # Render has requests even if httpx is missing - use sync requests in thread
+                    import requests as _rq
+                    _rr = _rq.post(url.rstrip("/") + "/pipeline", json=[["PING"]], headers=hdr, timeout=6.0)
+                    class _R: pass
+                    r = _R(); r.status_code = _rr.status_code; r.text = _rr.text or ""
             out["http_status"] = r.status_code
             out["body"] = (r.text or "")[:160]
             if r.status_code == 200 and "PONG" in (r.text or ""):
