@@ -845,58 +845,58 @@ except Exception as _e_fire:
 
 
 # ======================================================================
-# FIX FINAL v2 — /cron/outcome: bo key + tra 200 ngay + chay nen
-# Ly do phai xoa route cu + tao route moi:
-#  - Log Render cua bro (9:27 PM, commit e55d726) cho thay:
-#    [fire-v46] GET /cron/outcome (CRON_KEY) -> ready version=3.0.28-fire
-#    Tuc la patch_agent_fire_v46.py la file dinh nghia /cron/outcome
-#    va no DOI ?key=<CRON_KEY> khop voi env Render. Sai key = 401.
-#  - Patch kieu "sua endpoint giu nguyen route" bi loi vi FastAPI
-#    van giu dependant cu (no doi param key) -> de 500.
-#  - Cach sach nhat: luu ham goc, XOA het route /cron/outcome cu,
-#    them route MOI @app.get("/cron/outcome") khong can key.
-# Chi cham vao RIENG /cron/outcome. /export, /ledger, /stats van giu key.
-# Sau deploy, log phai co dong: [fix-outcome-final-v2] installed, replaced=N
+# FIX FINAL v3 — /cron/outcome: sua 422 Unprocessable Entity
+# Log Render moi nhat (10:57 PM, commit 71f1032) cho thay:
+#   GET /cron/outcome -> 422 Unprocessable Content
+#   cron-job.org cung bao 422
+# Ly do: ban v2 dinh nghia ham moi la
+#   async def _cron_outcome_no_key(request, limit: int = 50, ...)
+#   ma khong ghi kieu cho `request`.
+# FastAPI hieu `request` khong co type = 1 query param BAT BUOC
+# ten la `request`. Cron-job goi /cron/outcome khong co ?request=...
+# nen FastAPI tra 422 "thieu param request".
+# Ban v3 sua: request: Request (co type) + chi nhan param optional.
+# Van giu: bo key, tra 200 ngay, chay nen.
+# Sau deploy, log phai co: [fix-outcome-final-v3] installed, replaced=N
 # Cron URL: https://signal-api-24q4.onrender.com/cron/outcome (khong ?key=)
 # ======================================================================
 try:
-    import threading as _fx2_th
-    import sys as _fx2_sys
-    _fx2_app = globals().get("app")
-    _fx2_g = globals().get("g") if isinstance(globals().get("g"), dict) else {}
-    _fx2_router = getattr(_fx2_app, "router", _fx2_app)
-    _fx2_all = list(getattr(_fx2_router, "routes", []) or [])
-    _fx2_old = [r for r in _fx2_all if getattr(r, "path", "") == "/cron/outcome"]
-    _fx2_orig = getattr(_fx2_old[0], "endpoint", None) if _fx2_old else None
-    _fx2_orig_globals = getattr(_fx2_orig, "__globals__", {}) or {} if _fx2_orig else {}
-    print(f"[fix-outcome-final-v2] found {_fx2_old.__len__()} old /cron/outcome route(s), orig={'yes' if _fx2_orig else 'no'}")
-    # --- Dam bao /ping ton tai ---
+    import threading as _fx3_th
+    import sys as _fx3_sys
+    from fastapi import Request as _ReqV3
+    _fx3_app = globals().get("app")
+    _fx3_g = globals().get("g") if isinstance(globals().get("g"), dict) else {}
+    _fx3_router = getattr(_fx3_app, "router", _fx3_app)
+    _fx3_all = list(getattr(_fx3_router, "routes", []) or [])
+    _fx3_old = [r for r in _fx3_all if getattr(r, "path", "") == "/cron/outcome"]
+    _fx3_orig = getattr(_fx3_old[0], "endpoint", None) if _fx3_old else None
+    _fx3_orig_globals = getattr(_fx3_orig, "__globals__", {}) or {} if _fx3_orig else {}
+    print(f"[fix-outcome-final-v3] found {len(_fx3_old)} old /cron/outcome route(s), orig={'yes' if _fx3_orig else 'no'}")
     try:
-        _has_ping = any(getattr(r, "path", "") == "/ping" for r in _fx2_all)
-        if not _has_ping and hasattr(_fx2_app, "get"):
-            @_fx2_app.get("/ping")
-            async def _ping_fixed_v2():
-                return {"status": "ok", "version": _fx2_g.get("VERSION") or "3.0.28-fire"}
-            print("[fix-outcome-final-v2] /ping added (was missing)")
-    except Exception as _e_ping2:
-        print(f"[fix-outcome-final-v2] /ping skip: {_e_ping2}")
-    _fx2_lock = _fx2_th.Lock()
-    _fx2_running = {"busy": False}
-    if _fx2_orig is not None:
-        # Xoa route cu (ca router.routes va app.routes neu khac nhau)
+        _has_ping = any(getattr(r, "path", "") == "/ping" for r in _fx3_all)
+        if not _has_ping and hasattr(_fx3_app, "get"):
+            @_fx3_app.get("/ping")
+            async def _ping_fixed_v3():
+                return {"status": "ok", "version": _fx3_g.get("VERSION") or "3.0.28-fire"}
+            print("[fix-outcome-final-v3] /ping added (was missing)")
+    except Exception as _e_ping3:
+        print(f"[fix-outcome-final-v3] /ping skip: {_e_ping3}")
+    _fx3_lock = _fx3_th.Lock()
+    _fx3_running = {"busy": False}
+    if _fx3_orig is not None:
         try:
-            _fx2_router.routes[:] = [r for r in list(_fx2_router.routes) if getattr(r, "path", "") != "/cron/outcome"]
+            _fx3_router.routes[:] = [r for r in list(_fx3_router.routes) if getattr(r, "path", "") != "/cron/outcome"]
         except Exception:
             pass
         try:
-            if getattr(_fx2_app, "routes", None) is not getattr(_fx2_router, "routes", None):
-                _fx2_app.routes[:] = [r for r in list(_fx2_app.routes) if getattr(r, "path", "") != "/cron/outcome"]
+            if getattr(_fx3_app, "routes", None) is not getattr(_fx3_router, "routes", None):
+                _fx3_app.routes[:] = [r for r in list(_fx3_app.routes) if getattr(r, "path", "") != "/cron/outcome"]
         except Exception:
             pass
-        # Route moi - FastAPI tu build dependant moi tu ham nay, khong bi vuong dependant cu
-        @_fx2_app.get("/cron/outcome")
-        async def _cron_outcome_no_key(request, limit: int = 50, key: str = "", cron_key: str = "", **_extra):
-            # limit tu query neu co
+        # QUAN TRONG: request phai co type Request, cac param khac deu co default
+        # de FastAPI khong coi bat cu cai nao la bat buoc -> het 422
+        @_fx3_app.api_route("/cron/outcome", methods=["GET", "POST", "HEAD"])
+        async def _cron_outcome_no_key_v3(request: _ReqV3, limit: int = 50, key: str = "", cron_key: str = ""):
             try:
                 _qp = dict(getattr(request, "query_params", {}) or {})
                 if "limit" in _qp:
@@ -906,10 +906,10 @@ try:
                         pass
             except Exception:
                 pass
-            with _fx2_lock:
-                if _fx2_running["busy"]:
+            with _fx3_lock:
+                if _fx3_running["busy"]:
                     return {"status": "already_running", "note": "outcome dang chay background, de yen, lan sau check tiep"}
-                _fx2_running["busy"] = True
+                _fx3_running["busy"] = True
             _incoming = (key or cron_key or "")
             try:
                 _incoming = (dict(getattr(request, "query_params", {}) or {}).get("key") or _incoming or "")
@@ -936,10 +936,10 @@ try:
                     except Exception:
                         pass
                 try:
-                    _patch_dict(_fx2_orig_globals)
-                    _patch_dict(_fx2_g)
+                    _patch_dict(_fx3_orig_globals)
+                    _patch_dict(_fx3_g)
                     for _mn in ("core_final", "core", "extensions", "features", "patch_agent_fire_v46"):
-                        _m = _fx2_sys.modules.get(_mn)
+                        _m = _fx3_sys.modules.get(_mn)
                         if _m is not None:
                             try:
                                 _patch_dict(vars(_m))
@@ -952,7 +952,6 @@ try:
                     _fake = _FakeReq({"limit": str(limit), "key": _incoming or "bypass-nokey", "cron_key": _incoming or "bypass-nokey"}, _headers)
                     _res = None
                     _called = False
-                    # Thu cac dang chu ky ham goc co the co: (request, limit) / (request) / (limit) / ()
                     for _args, _kwargs in [
                         ((_fake,), {"limit": limit}),
                         ((_fake,), {}),
@@ -961,7 +960,7 @@ try:
                         ((_fake, limit), {}),
                     ]:
                         try:
-                            _res = _fx2_orig(*_args, **_kwargs)
+                            _res = _fx3_orig(*_args, **_kwargs)
                             _called = True
                             break
                         except TypeError as _te:
@@ -970,43 +969,42 @@ try:
                                 continue
                             raise
                     if not _called:
-                        print("[fix-outcome-final-v2] background: khong goi duoc ham goc (signature la)")
+                        print("[fix-outcome-final-v3] background: khong goi duoc ham goc (signature la)")
                     else:
-                        import asyncio as _aio2
-                        if _aio2.iscoroutine(_res):
+                        import asyncio as _aio3
+                        if _aio3.iscoroutine(_res):
                             try:
-                                _aio2.run(_res)
+                                _aio3.run(_res)
                             except RuntimeError:
-                                _loop2 = _aio2.new_event_loop()
+                                _loop3 = _aio3.new_event_loop()
                                 try:
-                                    _loop2.run_until_complete(_res)
+                                    _loop3.run_until_complete(_res)
                                 finally:
-                                    _loop2.close()
-                        print(f"[fix-outcome-final-v2] background done: {str(_res)[:220] if isinstance(_res, dict) else type(_res).__name__}")
-                except Exception as _e_bg2:
-                    print(f"[fix-outcome-final-v2] background FAILED: {type(_e_bg2).__name__}: {str(_e_bg2)[:400]}")
+                                    _loop3.close()
+                        print(f"[fix-outcome-final-v3] background done: {str(_res)[:220] if isinstance(_res, dict) else type(_res).__name__}")
+                except Exception as _e_bg3:
+                    print(f"[fix-outcome-final-v3] background FAILED: {type(_e_bg3).__name__}: {str(_e_bg3)[:400]}")
                 finally:
                     for _d, _k, _old in reversed(_to_restore):
                         try:
                             _d[_k] = _old
                         except Exception:
                             pass
-                    with _fx2_lock:
-                        _fx2_running["busy"] = False
-            _fx2_th.Thread(target=_bg, daemon=True).start()
+                    with _fx3_lock:
+                        _fx3_running["busy"] = False
+            _fx3_th.Thread(target=_bg, daemon=True).start()
             return {"status": "started", "mode": "background", "limit": limit, "note": "da tra 200 cho cron-job, outcome dang chay nen phia sau. 5-10 phut sau vo /health coi multi_horizon_pending co giam khong."}
-        # Dua route moi len dau (truoc catch-all /{mint})
         try:
-            _all2 = getattr(_fx2_router, "routes", None)
-            if _all2 is not None:
-                _outs = [r for r in list(_all2) if getattr(r, "path", "") == "/cron/outcome"]
-                _rest = [r for r in list(_all2) if getattr(r, "path", "") != "/cron/outcome"]
-                _all2[:] = _outs + _rest
+            _all3 = getattr(_fx3_router, "routes", None)
+            if _all3 is not None:
+                _outs = [r for r in list(_all3) if getattr(r, "path", "") == "/cron/outcome"]
+                _rest = [r for r in list(_all3) if getattr(r, "path", "") != "/cron/outcome"]
+                _all3[:] = _outs + _rest
         except Exception:
             pass
-        print(f"[fix-outcome-final-v2] installed, replaced={len(_fx2_old)} old route(s) — no key, 200 ngay + background")
+        print(f"[fix-outcome-final-v3] installed, replaced={len(_fx3_old)} old route(s) — no key, 200 ngay + background, da sua 422")
     else:
-        print("[fix-outcome-final-v2] WARNING: khong thay route /cron/outcome cu de thay — co the core_final/fire-v46 chua dinh nghia route nay trong ban nay")
-except Exception as _e_final2:
-    print(f"[fix-outcome-final-v2] FAILED (fail-open, app van chay): {_e_final2}")
+        print("[fix-outcome-final-v3] WARNING: khong thay route /cron/outcome cu")
+except Exception as _e_final3:
+    print(f"[fix-outcome-final-v3] FAILED (fail-open, app van chay): {_e_final3}")
 
