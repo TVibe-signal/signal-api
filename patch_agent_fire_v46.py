@@ -22,6 +22,7 @@ import os
 import time
 from typing import Any, Dict, List, Optional
 import asyncio
+import hmac
 import inspect
 
 try:  # module-level on purpose: with `from __future__ import annotations` FastAPI resolves
@@ -522,8 +523,62 @@ Public free instance — self-host for high volume. GET /ops/fair-use if present
 
     print("[fire-v46] GET /agent/batch")
 
+    # ---------- 7) /cron/outcome (resolve due 24h outcomes on demand) ----------
+    _drop_paths({"/cron/outcome"})
+    _cron_lock = asyncio.Lock()
+    _cron_fails: Dict[str, List[float]] = {}
+
+    def _cron_expected() -> str:
+        for name in ("CRON_KEY", "CRON_SECRET", "ADMIN_TOKEN", "ADMIN_KEY", "OUTCOME_KEY"):
+            v = (os.environ.get(name) or "").strip()
+            if v:
+                return v
+        return ""
+
+    @app.get("/cron/outcome", include_in_schema=False)
+    async def cron_outcome(request: Request, key: str = Query(default="")):
+        """Cron hook: resolve predictions that are due (24h). Key via ?key= or header X-Cron-Key."""
+        ip = "?"
+        try:
+            ip = (callable(client_ip) and client_ip(request)) or (request.client.host if request.client else "?")
+        except Exception:
+            pass
+        now = time.time()
+        fails = [t for t in _cron_fails.get(ip, []) if now - t < 600]
+        if len(fails) >= 8:
+            return JSONResponse({"error": "too_many_bad_keys"}, status_code=429, headers={"Retry-After": "600"})
+        expected = _cron_expected()
+        if not expected:
+            return JSONResponse({"error": "cron_key_not_configured",
+                                 "hint": "set CRON_KEY in Render environment"}, status_code=503)
+        given = (request.headers.get("x-cron-key") or key or "").strip()
+        if not hmac.compare_digest(given.encode("utf-8"), expected.encode("utf-8")):
+            fails.append(now)
+            _cron_fails[ip] = fails
+            if len(_cron_fails) > 2000:
+                _cron_fails.clear()
+            return JSONResponse({"error": "unauthorized"}, status_code=401)
+        resolve = G.get("resolve_due")
+        client = getattr(request.app.state, "client", None)
+        if not callable(resolve) or client is None:
+            return JSONResponse({"ok": False, "error": "resolver_unavailable"}, status_code=503)
+        if _cron_lock.locked():
+            return JSONResponse({"ok": True, "skipped": "already_running"})
+        async with _cron_lock:
+            try:
+                n = await asyncio.wait_for(resolve(client), timeout=50)
+            except asyncio.TimeoutError:
+                return JSONResponse({"ok": False, "error": "timeout"}, status_code=504)
+            except Exception as e:
+                print("[fire-v46] cron/outcome failed:", type(e).__name__)
+                return JSONResponse({"ok": False, "error": "resolve_failed"}, status_code=500)
+        return {"ok": True, "resolved": n, "ts": int(time.time())}
+
+    print("[fire-v46] GET /cron/outcome (CRON_KEY)")
+
     # Route order: keep critical paths in front
     _front(
+        "/cron/outcome",
         "/omni",
         "/signal",
         "/stats",
