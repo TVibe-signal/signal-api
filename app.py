@@ -85,8 +85,10 @@ def _apply_pro_v43_inline(g):
         paths = [getattr(r, "path", "") for r in getattr(app, "routes", [])]
     except:
         paths = []
-    if "/pro_status" in paths:
+    if "/pro_status" in paths and "/store_check" in paths:
         print("[pro_v43] already applied"); return
+    if "/pro_status" in paths:
+        print("[pro_v43] pro_status exists, will still add missing /store_check")
     # --- PRO ENGINE loader: supports BOTH pro_engine.py and pro-engine.py ---
     # pro-engine.py has a hyphen, so `import pro_engine` fails on Render.
     # Try normal import first, then load by file path.
@@ -630,7 +632,7 @@ try:
     # Stable priority for agent + PRO + health (first match wins among equals)
     _prio = [
         "/omni", "/signal", "/signals", "/stats", "/health", "/mcp", "/ping",
-        "/pro", "/pro_json", "/pro_status", "/omni_pro", "/compare", "/batch", "/check",
+        "/pro", "/pro_json", "/pro_status", "/store_check", "/omni_pro", "/compare", "/batch", "/check",
         "/cron/outcome", "/export", "/ledger", "/methodology", "/history",
         "/llms.txt", "/skill.json", "/rules", "/agent/playbook", "/docs", "/openapi.json",
         "/",
@@ -708,5 +710,68 @@ try:
         print("[rescue-v44] /stats route not found to wrap")
 except Exception as _e:
     print(f"[rescue-v44] stats wrap FAILED: {_e}")
+
+# --- GUARANTEE /store_check always exists (fix Not Found) ---
+# Root cause: _apply_pro returns early if /pro_status already exists in core,
+# so /store_check inside it never gets registered. This block re-installs it
+# AFTER rescue sorting, directly on app, so it cannot be skipped.
+try:
+    from fastapi import Request as _ReqGC
+    from fastapi.responses import JSONResponse as _JRGC
+    # Remove any old /store_check so we don't have duplicates
+    try:
+        app.router.routes[:] = [r for r in list(app.router.routes) if getattr(r, "path", "") != "/store_check"]
+    except Exception:
+        pass
+    @app.get("/store_check")
+    async def store_check_guaranteed(request: _ReqGC):
+        """Why is Upstash unreachable? Never prints token. Guaranteed route."""
+        try:
+            import os as _osGC
+            url = (_osGC.getenv("UPSTASH_REDIS_REST_URL") or _osGC.getenv("REDIS_URL") or "").strip()
+            tok = (_osGC.getenv("UPSTASH_REDIS_REST_TOKEN") or _osGC.getenv("REDIS_TOKEN") or "").strip()
+            # Also try loader globals if env missing
+            try:
+                if not url and isinstance(g, dict):
+                    url = (g.get("UPSTASH_REDIS_REST_URL") or g.get("REDIS_URL") or "").strip()
+                if not tok and isinstance(g, dict):
+                    tok = (g.get("UPSTASH_REDIS_REST_TOKEN") or g.get("REDIS_TOKEN") or "").strip()
+            except Exception:
+                pass
+            out = {"UPSTASH_REDIS_REST_URL_set": bool(url), "UPSTASH_REDIS_REST_TOKEN_set": bool(tok)}
+            if not (url and tok):
+                out["verdict"] = "missing env var(s) on Render"
+                return out
+            from urllib.parse import urlparse as _upGC
+            pu = _upGC(url)
+            host = pu.netloc
+            out.update({"url_scheme": pu.scheme, "url_host": (host[:5] + "..." + host[-14:]) if len(host) > 22 else host,
+                        "token_length": len(tok), "token_has_whitespace": tok != tok.strip() or " " in tok})
+            if pu.scheme != "https":
+                out["verdict"] = "URL must be the REST url (https://xxxx.upstash.io), not a redis:// / rediss:// address"
+                return out
+            try:
+                import requests as _rqGC
+                _rr = _rqGC.post(url.rstrip("/") + "/pipeline", json=[["PING"]], headers={"Authorization": "Bearer " + tok}, timeout=6.0)
+                out["http_status"] = _rr.status_code
+                out["body"] = (_rr.text or "")[:160]
+                if _rr.status_code == 200 and "PONG" in (_rr.text or ""):
+                    out["verdict"] = "OK - store answers PING (health shows it again within 5 minutes)"
+                elif _rr.status_code in (401, 403):
+                    out["verdict"] = "token rejected - copy the REST token again from the Upstash database page"
+                elif _rr.status_code == 404:
+                    out["verdict"] = "URL not found - database deleted/paused or URL wrong"
+                else:
+                    out["verdict"] = "unexpected answer - see body"
+            except Exception as e:
+                out["error"] = type(e).__name__
+                out["detail"] = str(e)[:140]
+                out["verdict"] = "cannot reach Upstash from Render (DNS / timeout / wrong host)"
+            return out
+        except Exception as e:
+            return _JRGC({"error": type(e).__name__, "detail": str(e)[:140]}, status_code=500)
+    print("[store_check] guaranteed route installed")
+except Exception as _eGC:
+    print(f"[store_check] guarantee FAILED: {_eGC}")
 
 print("[rescue-v44] done")
