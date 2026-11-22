@@ -47,7 +47,7 @@ Public instance is **free** with fair use. Defaults (override with env vars):
 ## Self-host
 
 ```bash
-git clone https://github.com/TVibex402/signal-api
+git clone https://github.com/TVibe-signal/signal-api
 cd signal-api
 pip install -r requirements.txt
 uvicorn app:app --host 0.0.0.0 --port 8000
