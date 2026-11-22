@@ -11,7 +11,7 @@ import os
 import sys
 import re
 import traceback
-from urllib.parse import quote as _urlquote
+from urllib.parse import quote as _urlquote, urlparse as _urlparse
 from fastapi import Request  # module-level: FastAPI resolves 'Request' annotations from module globals
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -121,6 +121,51 @@ def _apply_pro_v43_inline(g):
                 "build": "v45-blobs-inline-2026-11-21",
                 "engine": _pe.status(),
                 "note": "PRO engine v45: owner-resolved holders, oldest-tx creator, burn-only LP safe, unverified when data is missing"}
+
+    @app.get("/store_check")
+    async def store_check(request: Request):
+        """Why is the track-record store (Upstash REST) unreachable? Never prints the token."""
+        ok, retry, _scope = _pe.allow_request(_pe.client_ip(request), 5)
+        if not ok:
+            return JSONResponse({"error": "rate_limited", "retry_after_s": retry}, status_code=429,
+                                headers={"Retry-After": str(retry)})
+        url = ((g.get("REDIS_URL") if isinstance(g, dict) else "") or "").strip()
+        tok = ((g.get("REDIS_TOKEN") if isinstance(g, dict) else "") or "").strip()
+        out = {"UPSTASH_REDIS_REST_URL_set": bool(url), "UPSTASH_REDIS_REST_TOKEN_set": bool(tok)}
+        if not (url and tok):
+            out["verdict"] = "missing env var(s) on Render"
+            return out
+        pu = _urlparse(url)
+        host = pu.netloc
+        out.update({"url_scheme": pu.scheme, "url_host": (host[:5] + "..." + host[-14:]) if len(host) > 22 else host,
+                    "token_length": len(tok), "token_has_whitespace": tok != tok.strip() or " " in tok})
+        if pu.scheme != "https":
+            out["verdict"] = "URL must be the REST url (https://xxxx.upstash.io), not a redis:// / rediss:// address"
+            return out
+        try:
+            client = getattr(request.app.state, "client", None)
+            hdr = {"Authorization": "Bearer " + tok}
+            if client is not None:
+                r = await client.post(url.rstrip("/") + "/pipeline", json=[["PING"]], headers=hdr, timeout=6.0)
+            else:
+                import httpx as _hx
+                async with _hx.AsyncClient() as _c:
+                    r = await _c.post(url.rstrip("/") + "/pipeline", json=[["PING"]], headers=hdr, timeout=6.0)
+            out["http_status"] = r.status_code
+            out["body"] = (r.text or "")[:160]
+            if r.status_code == 200 and "PONG" in (r.text or ""):
+                out["verdict"] = "OK - store answers PING (health shows it again within 5 minutes)"
+            elif r.status_code in (401, 403):
+                out["verdict"] = "token rejected - copy the REST token again from the Upstash database page"
+            elif r.status_code == 404:
+                out["verdict"] = "URL not found - database deleted/paused or URL wrong"
+            else:
+                out["verdict"] = "unexpected answer - see body"
+        except Exception as e:
+            out["error"] = type(e).__name__
+            out["detail"] = str(e)[:140]
+            out["verdict"] = "cannot reach Upstash from Render (DNS / timeout / wrong host)"
+        return out
 
     @app.get("/pro")
     def pro_html(request: Request, mint: str = Query(default="")):
