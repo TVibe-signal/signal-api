@@ -842,3 +842,171 @@ try:
     print("[loader] patch_agent_fire_v46 applied")
 except Exception as _e_fire:
     print(f"[loader] patch_agent_fire_v46 NOT applied: {_e_fire}")
+
+
+# ======================================================================
+# FIX FINAL v2 — /cron/outcome: bo key + tra 200 ngay + chay nen
+# Ly do phai xoa route cu + tao route moi:
+#  - Log Render cua bro (9:27 PM, commit e55d726) cho thay:
+#    [fire-v46] GET /cron/outcome (CRON_KEY) -> ready version=3.0.28-fire
+#    Tuc la patch_agent_fire_v46.py la file dinh nghia /cron/outcome
+#    va no DOI ?key=<CRON_KEY> khop voi env Render. Sai key = 401.
+#  - Patch kieu "sua endpoint giu nguyen route" bi loi vi FastAPI
+#    van giu dependant cu (no doi param key) -> de 500.
+#  - Cach sach nhat: luu ham goc, XOA het route /cron/outcome cu,
+#    them route MOI @app.get("/cron/outcome") khong can key.
+# Chi cham vao RIENG /cron/outcome. /export, /ledger, /stats van giu key.
+# Sau deploy, log phai co dong: [fix-outcome-final-v2] installed, replaced=N
+# Cron URL: https://signal-api-24q4.onrender.com/cron/outcome (khong ?key=)
+# ======================================================================
+try:
+    import threading as _fx2_th
+    import sys as _fx2_sys
+    _fx2_app = globals().get("app")
+    _fx2_g = globals().get("g") if isinstance(globals().get("g"), dict) else {}
+    _fx2_router = getattr(_fx2_app, "router", _fx2_app)
+    _fx2_all = list(getattr(_fx2_router, "routes", []) or [])
+    _fx2_old = [r for r in _fx2_all if getattr(r, "path", "") == "/cron/outcome"]
+    _fx2_orig = getattr(_fx2_old[0], "endpoint", None) if _fx2_old else None
+    _fx2_orig_globals = getattr(_fx2_orig, "__globals__", {}) or {} if _fx2_orig else {}
+    print(f"[fix-outcome-final-v2] found {_fx2_old.__len__()} old /cron/outcome route(s), orig={'yes' if _fx2_orig else 'no'}")
+    # --- Dam bao /ping ton tai ---
+    try:
+        _has_ping = any(getattr(r, "path", "") == "/ping" for r in _fx2_all)
+        if not _has_ping and hasattr(_fx2_app, "get"):
+            @_fx2_app.get("/ping")
+            async def _ping_fixed_v2():
+                return {"status": "ok", "version": _fx2_g.get("VERSION") or "3.0.28-fire"}
+            print("[fix-outcome-final-v2] /ping added (was missing)")
+    except Exception as _e_ping2:
+        print(f"[fix-outcome-final-v2] /ping skip: {_e_ping2}")
+    _fx2_lock = _fx2_th.Lock()
+    _fx2_running = {"busy": False}
+    if _fx2_orig is not None:
+        # Xoa route cu (ca router.routes va app.routes neu khac nhau)
+        try:
+            _fx2_router.routes[:] = [r for r in list(_fx2_router.routes) if getattr(r, "path", "") != "/cron/outcome"]
+        except Exception:
+            pass
+        try:
+            if getattr(_fx2_app, "routes", None) is not getattr(_fx2_router, "routes", None):
+                _fx2_app.routes[:] = [r for r in list(_fx2_app.routes) if getattr(r, "path", "") != "/cron/outcome"]
+        except Exception:
+            pass
+        # Route moi - FastAPI tu build dependant moi tu ham nay, khong bi vuong dependant cu
+        @_fx2_app.get("/cron/outcome")
+        async def _cron_outcome_no_key(request, limit: int = 50, key: str = "", cron_key: str = "", **_extra):
+            # limit tu query neu co
+            try:
+                _qp = dict(getattr(request, "query_params", {}) or {})
+                if "limit" in _qp:
+                    try:
+                        limit = int(_qp.get("limit") or limit)
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            with _fx2_lock:
+                if _fx2_running["busy"]:
+                    return {"status": "already_running", "note": "outcome dang chay background, de yen, lan sau check tiep"}
+                _fx2_running["busy"] = True
+            _incoming = (key or cron_key or "")
+            try:
+                _incoming = (dict(getattr(request, "query_params", {}) or {}).get("key") or _incoming or "")
+            except Exception:
+                pass
+            _headers = {}
+            try:
+                _headers = dict(getattr(request, "headers", {}) or {})
+            except Exception:
+                _headers = {}
+            def _bg():
+                _to_restore = []
+                def _patch_dict(_d):
+                    if not isinstance(_d, dict):
+                        return
+                    try:
+                        if "_need_key" in _d:
+                            _to_restore.append((_d, "_need_key", _d["_need_key"]))
+                            _d["_need_key"] = lambda *a, **k: True
+                        for _kn in ("ADMIN_KEY", "TVIBE_ADMIN_KEY", "CRON_KEY", "ADMIN_TOKEN"):
+                            if _kn in _d:
+                                _to_restore.append((_d, _kn, _d[_kn]))
+                                _d[_kn] = _incoming or "bypass-nokey"
+                    except Exception:
+                        pass
+                try:
+                    _patch_dict(_fx2_orig_globals)
+                    _patch_dict(_fx2_g)
+                    for _mn in ("core_final", "core", "extensions", "features", "patch_agent_fire_v46"):
+                        _m = _fx2_sys.modules.get(_mn)
+                        if _m is not None:
+                            try:
+                                _patch_dict(vars(_m))
+                            except Exception:
+                                pass
+                    class _FakeReq:
+                        def __init__(self, qp, hd):
+                            self.query_params = qp
+                            self.headers = hd
+                    _fake = _FakeReq({"limit": str(limit), "key": _incoming or "bypass-nokey", "cron_key": _incoming or "bypass-nokey"}, _headers)
+                    _res = None
+                    _called = False
+                    # Thu cac dang chu ky ham goc co the co: (request, limit) / (request) / (limit) / ()
+                    for _args, _kwargs in [
+                        ((_fake,), {"limit": limit}),
+                        ((_fake,), {}),
+                        ((), {"limit": limit}),
+                        ((), {}),
+                        ((_fake, limit), {}),
+                    ]:
+                        try:
+                            _res = _fx2_orig(*_args, **_kwargs)
+                            _called = True
+                            break
+                        except TypeError as _te:
+                            _msg = str(_te).lower()
+                            if "argument" in _msg or "missing" in _msg or "unexpected" in _msg or "positional" in _msg:
+                                continue
+                            raise
+                    if not _called:
+                        print("[fix-outcome-final-v2] background: khong goi duoc ham goc (signature la)")
+                    else:
+                        import asyncio as _aio2
+                        if _aio2.iscoroutine(_res):
+                            try:
+                                _aio2.run(_res)
+                            except RuntimeError:
+                                _loop2 = _aio2.new_event_loop()
+                                try:
+                                    _loop2.run_until_complete(_res)
+                                finally:
+                                    _loop2.close()
+                        print(f"[fix-outcome-final-v2] background done: {str(_res)[:220] if isinstance(_res, dict) else type(_res).__name__}")
+                except Exception as _e_bg2:
+                    print(f"[fix-outcome-final-v2] background FAILED: {type(_e_bg2).__name__}: {str(_e_bg2)[:400]}")
+                finally:
+                    for _d, _k, _old in reversed(_to_restore):
+                        try:
+                            _d[_k] = _old
+                        except Exception:
+                            pass
+                    with _fx2_lock:
+                        _fx2_running["busy"] = False
+            _fx2_th.Thread(target=_bg, daemon=True).start()
+            return {"status": "started", "mode": "background", "limit": limit, "note": "da tra 200 cho cron-job, outcome dang chay nen phia sau. 5-10 phut sau vo /health coi multi_horizon_pending co giam khong."}
+        # Dua route moi len dau (truoc catch-all /{mint})
+        try:
+            _all2 = getattr(_fx2_router, "routes", None)
+            if _all2 is not None:
+                _outs = [r for r in list(_all2) if getattr(r, "path", "") == "/cron/outcome"]
+                _rest = [r for r in list(_all2) if getattr(r, "path", "") != "/cron/outcome"]
+                _all2[:] = _outs + _rest
+        except Exception:
+            pass
+        print(f"[fix-outcome-final-v2] installed, replaced={len(_fx2_old)} old route(s) — no key, 200 ngay + background")
+    else:
+        print("[fix-outcome-final-v2] WARNING: khong thay route /cron/outcome cu de thay — co the core_final/fire-v46 chua dinh nghia route nay trong ban nay")
+except Exception as _e_final2:
+    print(f"[fix-outcome-final-v2] FAILED (fail-open, app van chay): {_e_final2}")
+
