@@ -836,3 +836,9 @@ try:
     print("[store_check] middleware installed (bypass router)")
 except Exception as _eSM:
     print(f"[store_check] middleware FAILED: {_eSM}")
+try:
+    import patch_agent_fire_v46
+    patch_agent_fire_v46.apply(g if "g" in dir() and isinstance(g, dict) else globals())
+    print("[loader] patch_agent_fire_v46 applied")
+except Exception as _e_fire:
+    print(f"[loader] patch_agent_fire_v46 NOT applied: {_e_fire}")
