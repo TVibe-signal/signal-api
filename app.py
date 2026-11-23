@@ -1008,3 +1008,5 @@ try:
 except Exception as _e_final3:
     print(f"[fix-outcome-final-v3] FAILED (fail-open, app van chay): {_e_final3}")
 
+import patch_tvibe_full_v48_en as _full
+_full.apply(g)
