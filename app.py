@@ -1017,3 +1017,5 @@ import patch_helius_404_fix as _fix404
 _fix404.apply(g)
 
 app = g.get("app")
+import patch_helius_404_fix_v3 as _fix404v3
+_fix404v3.apply(g)
