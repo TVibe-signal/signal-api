@@ -1010,3 +1010,10 @@ except Exception as _e_final3:
 
 import patch_tvibe_full_v48_en as _full
 _full.apply(g)
+import patch_tvibe_full_v48_en as _full
+_full.apply(g)
+
+import patch_helius_404_fix as _fix404
+_fix404.apply(g)
+
+app = g.get("app")
