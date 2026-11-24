@@ -1034,4 +1034,13 @@ try:
     print("[loader] patch_main_unified_v56 applied")
 except Exception as _e56b:
     print(f"[loader] patch_main_unified_v56 NOT applied: {_e56b}")
+  # V57 - FIX 422 CUOI CUNG - PHAI DE SAU CUNG, SAU TAT CA (lean, v55, v56)
+# 1 file nay thay cho ca lean + v56, tu xoa route cu + tu chan o ngoai cung.
+try:
+    import patch_fix_422_v57 as _v57
+    _v57.apply(g)
+    print("[loader] patch_fix_422_v57 applied")
+except Exception as _e57:
+    print(f"[loader] patch_fix_422_v57 NOT applied: {_e57}")
+  
   
