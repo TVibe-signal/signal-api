@@ -1025,5 +1025,4 @@ try:
     patch_lean_v56.apply(g if "g" in dir() and isinstance(g, dict) else globals())
     print("[loader] patch_lean_v56 applied")
 except Exception as _e56:
-    print(f"[loader] patch_lean_v56 NOT applied: {_e56}")
-  app = g.get("app")
+    print(f"[loader] patch_lean_v56 NOT applied: {_e56}") 
