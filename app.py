@@ -1019,3 +1019,10 @@ _fix404.apply(g)
 app = g.get("app")
 import patch_main_unified_v55 as _main55
 _main55.apply(g)
+# --- paste at the VERY END of app.py (AFTER patch_main_unified_v55) ---
+try:
+    import patch_lean_v56
+    patch_lean_v56.apply(g if "g" in dir() and isinstance(g, dict) else globals())
+    print("[loader] patch_lean_v56 applied")
+except Exception as _e56:
+    print(f"[loader] patch_lean_v56 NOT applied: {_e56}")
