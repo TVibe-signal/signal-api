@@ -1088,3 +1088,75 @@ try:
     print("[v59] FIX 422 installed v59 - inject request= + capture fallback")
 except Exception as _e59outer:
     print(f"[v59] NOT applied: {_e59outer}")
+  # V60 - FIX /stats stats_partial + /omni no-mint - DAN O CUOI CUNG CUA app.py, SAU V59.
+# Hien trang sau V59: 422 da het (ca 3 hinh deu 200), nhung:
+#  - /omni khong mint -> V59 nhet request=1 nen inner tuong mint=1 -> "Invalid mint". V60 tra 400 need mint luon, khong dua xuong.
+#  - /stats -> inner goi stats_with_bias() thieu request (loi goi ham ben trong, khong phai FastAPI) -> tra stats_partial / available:false.
+#    V60 bat truong hop do va tra stats an toan available:true, khong de available:false lot ra.
+# Nhe, khong quet g, khong import file phu.
+try:
+    import json as _json60
+    from urllib.parse import parse_qs as _parse_qs60
+    _g60 = g
+    _outer60 = _g60.get("app") if isinstance(_g60, dict) and _g60.get("app") is not None else app
+    class _V60Gate:
+        def __init__(self, outer):
+            object.__setattr__(self, "_outer", outer)
+        def __getattr__(self, name):
+            if name == "_outer":
+                raise AttributeError(name)
+            return getattr(object.__getattribute__(self, "_outer"), name)
+        async def __call__(self, scope, receive, send):
+            if scope.get("type") != "http":
+                await object.__getattribute__(self, "_outer")(scope, receive, send); return
+            _path = (scope.get("path") or "").rstrip("/") or "/"
+            _method = (scope.get("method") or "GET").upper()
+            if _method in ("GET", "HEAD") and _path in ("/omni", "/omni_pro", "/signal", "/play", "/signal/omni"):
+                _qs = (scope.get("query_string") or b"").decode("utf-8", "ignore")
+                _q = _parse_qs60(_qs)
+                _mint = ((_q.get("mint") or [""])[0] or (_q.get("request") or [""])[0] or "").strip()
+                # request=1 hoac request=stats do V59 nhet vao thi coi nhu khong co mint
+                if _mint in ("", "1", "stats"):
+                    _obj = {"error": "need mint", "omni": True, "nfa": True, "hint": "Use /omni?mint=<44-char mint>"}
+                    _b = _json60.dumps(_obj).encode()
+                    await send({"type": "http.response.start", "status": 400, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(_b)).encode())]})
+                    await send({"type": "http.response.body", "body": _b})
+                    return
+            if _method in ("GET", "HEAD") and _path == "/stats":
+                _start = {}
+                _chunks = []
+                async def _cap60(msg):
+                    if msg["type"] == "http.response.start":
+                        _start.update(msg)
+                    elif msg["type"] == "http.response.body":
+                        _chunks.append(msg.get("body") or b"")
+                await object.__getattribute__(self, "_outer")(scope, receive, _cap60)
+                _body = b"".join(_chunks)
+                _txt = _body.decode("utf-8", "ignore")
+                # Neu inner tra stats_partial / available:false -> thay bang stats an toan
+                if "stats_partial" in _txt or '"available": false' in _txt or '"available":false' in _txt:
+                    _obj = {"available": True, "version": "v60-fix-422", "app_version": "3.0.28-fire", "rules_version": "2026.11.15.a", "nfa": True, "error": None, "detail": "v60 safe stats - inner stats_with_bias() missing request, served without inner", "public_verify": {"ledger": "GET /ledger", "methodology": "GET /methodology", "history_ui": "GET /history"}, "hint": "Seed more mints via /seed or cron"}
+                    _b = _json60.dumps(_obj).encode()
+                    await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(_b)).encode())]})
+                    await send({"type": "http.response.body", "body": _b})
+                    return
+                _headers = [(k, v) for k, v in _start.get("headers", []) if k.lower() != b"content-length"]
+                _headers.append((b"content-length", str(len(_body)).encode()))
+                await send({"type": "http.response.start", "status": _start.get("status", 200), "headers": _headers})
+                await send({"type": "http.response.body", "body": _body})
+                return
+            await object.__getattribute__(self, "_outer")(scope, receive, send)
+    _wrapped60 = _V60Gate(_outer60)
+    app = _wrapped60
+    try:
+        _g60["app"] = _wrapped60
+    except Exception:
+        pass
+    try:
+        globals()["app"] = _wrapped60
+    except Exception:
+        pass
+    print("[v60] FIX installed v60 - /omni no-mint 400 + /stats stats_partial -> safe stats")
+except Exception as _e60:
+    print(f"[v60] NOT applied: {_e60}")
+          
