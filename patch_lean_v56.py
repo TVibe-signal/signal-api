@@ -23,7 +23,7 @@ import sys
 from typing import Any, Dict, List, Optional
 from urllib.parse import parse_qs
 
-VERSION = "3.0.30-lean"
+VERSION = "3.0.31-lean-fix-omni-422"
 BASE = (os.environ.get("PUBLIC_BASE_URL") or "https://signal-api-24q4.onrender.com").rstrip("/")
 
 
@@ -125,10 +125,12 @@ def apply(G: dict) -> None:
     @core.get("/omni", tags=["product"])
     async def omni_lean(
         request: Request,
-        mint: str = Query(..., min_length=32, max_length=64),
+        mint: str = Query(default="", max_length=64),
         view: str = Query("full"),
     ):
         mint = (mint or "").strip()
+        if not mint:
+            return JSONResponse({"error": "need mint", "omni": True, "nfa": True}, status_code=400)
         client = getattr(request.app.state, "client", None)
         # if core was unwrapped, state may be on outer — try request.app
         if client is None:
