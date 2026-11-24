@@ -135,3 +135,11 @@ async def omni(request: Request, mint: str | None = Query(default=None), view: s
 @app.get("/play")
 async def play(request: Request, mint: str | None = Query(default=None), view: str = Query("full")):
     return JSONResponse(content=await omni_impl(request, mint, view), status_code=200) 
+# V58 - FIX 422 - PHAI DE O CUOI CUNG CUA main.py (Render chay uvicorn main:app, KHONG phai app.py)
+try:
+    import patch_fix_422_v58 as _v58
+    _v58.apply(g)
+    print("[loader] patch_fix_422_v58 applied")
+except Exception as _e58:
+    print(f"[loader] patch_fix_422_v58 NOT applied: {_e58}")
+
