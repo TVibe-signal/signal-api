@@ -1026,3 +1026,12 @@ try:
     print("[loader] patch_lean_v56 applied")
 except Exception as _e56:
     print(f"[loader] patch_lean_v56 NOT applied: {_e56}") 
+  # 2) Main Unified V56 - fix /omni + /stats 422 - PHAI DE SAU CUNG, SAU LEAN
+# KHONG them dong app = g.get("app") nua. V55 + lean da sync roi.
+try:
+    import patch_main_unified_v56 as _main56
+    _main56.apply(g)
+    print("[loader] patch_main_unified_v56 applied")
+except Exception as _e56b:
+    print(f"[loader] patch_main_unified_v56 NOT applied: {_e56b}")
+  
