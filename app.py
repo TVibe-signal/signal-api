@@ -1429,5 +1429,143 @@ try:
     print("[v63] FIX installed v63 - /ml/features + /ml/anomaly unsupervised, verdict unchanged")
 except Exception as _e63:
     print(f"[v63] NOT applied: {_e63}")
-
+# V64 - PHASE 1: REAL STATS FROM LEDGER + PRO_JSON STALE CACHE - APPEND AT THE VERY END OF app.py, AFTER V63.
+# ALL CODE AND COMMENTS IN ENGLISH.
+# What it does:
+#  1) /stats: no longer returns fake available:false forever. It calls inner /ledger, counts real entries,
+#     and returns available:true with real numbers when ledger has data. If ledger is empty, stays honest false.
+#     Stats = total, resolved, pending, by_verdict, gap (pending / total). No invented numbers.
+#  2) /pro_json: simple honest cache. If inner returns 200, cache it for 300s. If inner returns 503 and a
+#     cached entry exists (<300s old), return cached body + stale:true + warning. Never fake fresh data.
+#  3) Verdict unchanged. No Helius change. No cron change.
+#  4) /health: pass-through, no fake mcp/redis status.
+try:
+    import json as _json64, time as _time64
+    _g64 = g if isinstance(g, dict) else {}
+    _outer64 = _g64.get("app") if isinstance(_g64, dict) and _g64.get("app") is not None else app
+    _PRO_CACHE64 = {}
+    _CACHE_TTL64 = 300
+    class _V64Gate:
+        def __init__(self, outer):
+            object.__setattr__(self, "_outer", outer)
+        def __getattr__(self, name):
+            if name == "_outer":
+                raise AttributeError(name)
+            return getattr(object.__getattribute__(self, "_outer"), name)
+        async def __call__(self, scope, receive, send):
+            if scope.get("type") != "http":
+                await object.__getattribute__(self, "_outer")(scope, receive, send); return
+            _path = (scope.get("path") or "").rstrip("/") or "/"
+            _method = (scope.get("method") or "GET").upper()
+            # --- /stats: compute from /ledger ---
+            if _method in ("GET", "HEAD") and _path == "/stats":
+                _start = {}
+                _chunks = []
+                async def _cap_ledger(msg):
+                    if msg["type"] == "http.response.start":
+                        _start.update(msg)
+                    elif msg["type"] == "http.response.body":
+                        _chunks.append(msg.get("body") or b"")
+                _ledger_scope = dict(scope); _ledger_scope["path"] = "/ledger"; _ledger_scope["query_string"] = b""
+                await object.__getattribute__(self, "_outer")(_ledger_scope, receive, _cap_ledger)
+                try:
+                    _ledger = _json64.loads(b"".join(_chunks).decode("utf-8", "ignore") or "{}")
+                except Exception:
+                    _ledger = {}
+                _entries = []
+                if isinstance(_ledger, list):
+                    _entries = _ledger
+                elif isinstance(_ledger, dict):
+                    for _k in ["entries", "ledger", "items", "data", "results"]:
+                        if isinstance(_ledger.get(_k), list):
+                            _entries = _ledger.get(_k)
+                            break
+                    if not _entries and _ledger.get("total") is not None:
+                        # Ledger is already a stats-like dict, trust it if it has resolved
+                        if "resolved" in _ledger:
+                            _b = _json64.dumps({"available": True, "source": "ledger", "total": _ledger.get("total"), "resolved": _ledger.get("resolved"), "by_verdict": _ledger.get("by_verdict", {}), "nfa": True}).encode()
+                            await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(_b)).encode())]})
+                            await send({"type": "http.response.body", "body": _b})
+                            return
+                _total = len(_entries)
+                if _total == 0:
+                    _obj = {"available": False, "reason": "Ledger is empty. Seed mints or wait for cron outcome to fill ledger.", "nfa": True}
+                    _b = _json64.dumps(_obj).encode()
+                    await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(_b)).encode())]})
+                    await send({"type": "http.response.body", "body": _b})
+                    return
+                _resolved = 0
+                _pending = 0
+                _by_verdict = {}
+                for _e in _entries:
+                    if not isinstance(_e, dict):
+                        continue
+                    _v = str(_e.get("verdict") or _e.get("decision") or "unknown").lower()
+                    _by_verdict[_v] = _by_verdict.get(_v, 0) + 1
+                    _o = str(_e.get("outcome") or _e.get("outcome_24h") or _e.get("status") or "").lower()
+                    if _o in ("rug", "safe", "resolved", "decided", "pass", "fail", "ok"):
+                        _resolved += 1
+                    elif _o in ("pending", "waiting", "unknown", "", "unresolved"):
+                        _pending += 1
+                    else:
+                        _resolved += 1
+                _gap = round(_pending / _total, 3) if _total else 0
+                _obj = {"available": True, "source": "ledger", "total": _total, "resolved": _resolved, "pending": _pending, "by_verdict": _by_verdict, "gap_pending_ratio": _gap, "nfa": True, "note": "Resolved = entries with outcome rug/safe/decided. Pending = waiting for cron outcome."}
+                _b = _json64.dumps(_obj).encode()
+                await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(_b)).encode())]})
+                await send({"type": "http.response.body", "body": _b})
+                return
+            # --- /pro_json: honest stale cache on 503 ---
+            if _method in ("GET", "HEAD") and _path == "/pro_json":
+                from urllib.parse import parse_qs as _pq64
+                _qs = (scope.get("query_string") or b"").decode("utf-8", "ignore")
+                _q = _pq64(_qs)
+                _mint = ((_q.get("mint") or [""])[0] or "").strip()
+                _start = {}
+                _chunks = []
+                async def _cap_pro(msg):
+                    if msg["type"] == "http.response.start":
+                        _start.update(msg)
+                    elif msg["type"] == "http.response.body":
+                        _chunks.append(msg.get("body") or b"")
+                await object.__getattribute__(self, "_outer")(scope, receive, _cap_pro)
+                _status = _start.get("status", 200)
+                _body = b"".join(_chunks)
+                _now = _time64.time()
+                if _status == 200 and _mint:
+                    _PRO_CACHE64[_mint] = (_now, _body)
+                if _status == 503 and _mint and _mint in _PRO_CACHE64:
+                    _ts, _cached = _PRO_CACHE64[_mint]
+                    if _now - _ts < _CACHE_TTL64:
+                        try:
+                            _obj = _json64.loads(_cached.decode("utf-8", "ignore") or "{}")
+                        except Exception:
+                            _obj = {}
+                        if isinstance(_obj, dict):
+                            _obj["stale"] = True
+                            _obj["stale_warning"] = "Upstream failed (503). Returning cached result from last success. Not fresh data."
+                            _b = _json64.dumps(_obj).encode()
+                            await send({"type": "http.response.start", "status": 200, "headers": [(b"content-type", b"application/json"), (b"content-length", str(len(_b)).encode())]})
+                            await send({"type": "http.response.body", "body": _b})
+                            return
+                _headers = [(k, v) for k, v in _start.get("headers", []) if k.lower() != b"content-length"]
+                _headers.append((b"content-length", str(len(_body)).encode()))
+                await send({"type": "http.response.start", "status": _status, "headers": _headers})
+                await send({"type": "http.response.body", "body": _body})
+                return
+            await object.__getattribute__(self, "_outer")(scope, receive, send)
+    _wrapped64 = _V64Gate(_outer64)
+    app = _wrapped64
+    try:
+        _g64["app"] = _wrapped64
+    except Exception:
+        pass
+    try:
+        globals()["app"] = _wrapped64
+    except Exception:
+        pass
+    print("[v64] FIX installed v64 - real /stats from ledger + /pro_json stale cache")
+except Exception as _e64:
+    print(f"[v64] NOT applied: {_e64}")
+      
 
