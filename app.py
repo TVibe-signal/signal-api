@@ -1566,6 +1566,6 @@ try:
         pass
     print("[v64] FIX installed v64 - real /stats from ledger + /pro_json stale cache")
 except Exception as _e64:
-    print(f"[v64] NOT applied: {_e64}")
+    print(f"[v64] NOT applied: {_e64}") 
       
 
